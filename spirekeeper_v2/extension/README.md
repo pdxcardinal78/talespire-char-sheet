@@ -70,7 +70,39 @@ token path. The popup reports "Read using your signed-in session" for **both
 public and private** characters, and a private character imports — so the
 "set privacy to Public" requirement is gone.
 
-## Rolling (in progress)
+## Rolling — blocked, and not by this code
+
+**Do not spend more time here without re-testing the finding below.**
+
+A Symbiote URL only reaches the panel when TaleSpire is *not already running*.
+Verified by hand, with no extension involved: the same URL pasted into a
+browser address bar arrives when TaleSpire is closed (~7 s, cold launch) and
+never arrives when it is open. Chrome reports `Launched external handler` in
+both cases, so the browser does its part and the message is lost after the
+hand-off. Meanwhile `TS.urls.submit()` from inside the panel arrives in 6–9 ms,
+which proves the subscription, the handler and the decoder are all fine.
+
+"TaleSpire already running" is the only state that matters during a session, so
+rolling over a Symbiote URL cannot work. The code below is complete and
+correct as far as it can be tested; what it depends on is not available.
+
+Everything still works up to that last hop, and it is all verified:
+
+- 45 of 45 rollable buttons read off a live sheet
+- capture-phase interception ahead of D&D Beyond's own menu
+- base64url message, ~90 characters, well inside any measured ceiling
+- `window.location.href` — the one launch Chrome permits (see below)
+- the panel decodes, queues if mid-boot, and stages with roll mode and
+  effects applied — a click with advantage and Bless produced two d20 groups
+  plus a separate `Bless 1d4`
+
+If it is ever unblocked, that is the whole feature working. Worth re-testing
+after a TaleSpire update; it may be a bug rather than a policy. It is also
+worth checking whether `talespire://dice/` behaves differently, since that verb
+needs no Symbiote — it would cost advantage, effects, chat attribution and the
+GM's damage inbox, which is why it was not the first choice.
+
+## How it was built
 
 `rolls.js` reads the rollable buttons off a D&D Beyond sheet. Verified against
 a live level-3 cleric: **45 of 45 buttons** classified — 6 abilities, 6 saves,

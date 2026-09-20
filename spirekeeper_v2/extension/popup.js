@@ -81,6 +81,9 @@
     if (!onCharacterPage) {
       hint.textContent = "Open a character sheet for this to do anything.";
     }
+    // Default off, and it stays off unless someone deliberately turns it on:
+    // the feature is complete but its delivery path is unavailable.
+
   }
 
   async function boot() {

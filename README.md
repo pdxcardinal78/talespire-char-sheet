@@ -636,6 +636,28 @@ and each is worth remembering:
 3. The doubling ladder reported the last rung that passed, not the limit — off
    by up to 2x. It now binary-searches the gap.
 
+**The limit that stopped rolling (0.10.8, measured on macOS).** A Symbiote URL
+is delivered only when TaleSpire is *not already running*:
+
+| How the URL is sent | TaleSpire closed | TaleSpire running |
+|---|---|---|
+| Browser address bar, typed by hand | **arrives** (~7 s, cold launch) | **never arrives** |
+| `TS.urls.submit()` from inside the panel | n/a | arrives in 6–9 ms |
+
+Chrome reports `Launched external handler` in both browser cases, so the
+browser's part succeeds either way — the message is lost after the hand-off.
+The in-game path proves the panel, its `urls` subscription and its handler are
+all fine, and the probe log records every arrival, so an arriving message could
+not have been missed.
+
+That kills rolling from a browser extension, because "TaleSpire already
+running" is the only state that matters during a session. It says nothing
+about the importer, which goes via the clipboard and is unaffected.
+
+Worth re-testing after a TaleSpire update: it may be a bug rather than a
+policy, and `talespire://dice/` may behave differently from
+`talespire://symbiote/` here.
+
 Design consequences:
 
 - **Rolling over a Symbiote URL is comfortable.** A roll is ~130 characters
