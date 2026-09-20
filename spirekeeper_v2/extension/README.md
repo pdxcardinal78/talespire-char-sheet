@@ -95,8 +95,28 @@ since a d20 roll and a damage roll are not interchangeable.
 `Rolls.probe()` reports coverage. Run it on a sheet after a D&D Beyond update:
 if `unmatched` climbs, a selector has gone stale and the sample says where.
 
-Still to build: intercepting the click, and sending the roll to TaleSpire over
-a Symbiote URL.
+`content.js` intercepts the click, `link.js` sends it. Interception is **off by
+default** and toggled from the popup — D&D Beyond's own dice are perfectly good,
+and an extension that silently hijacks every click on someone's sheet is one
+they uninstall. The listener runs in the capture phase, because these buttons
+open a menu and a bubbling listener arrives too late.
+
+The roll travels as base64url in a `talespire://symbiote/<id>/…` URL, about 150
+characters against a measured 1984-character ceiling. base64url specifically:
+standard base64's `/` would split the URL path.
+
+Arriving as the panel's own code is the entire point, and it shows. A click on
+D&D Beyond with advantage set and Bless active stages:
+
+    Shillelagh (Adv)  1d20+5
+    Shillelagh (Adv)  1d20+5
+    Bless             1d4
+
+— two d20s to compare and a separate buff die, thrown quietly so the panel can
+report the surviving one. A raw `talespire://dice/` URL can do none of that.
+
+Still to verify in a real install: the click interception itself, and the
+protocol handler firing from a content script's hidden iframe.
 
 ## Next
 

@@ -113,7 +113,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.10.7";
+  const APP_VERSION = "0.10.8";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -2203,7 +2203,7 @@ const App = (() => {
       if (rolls.damage && !sp.requiresAttackRoll) {
         actions.appendChild(
           button(`Damage ${rolls.damage}`, "", (mode) =>
-            doRoll({ name: `${sp.name} damage`, damage: rolls.damage, mode, kind: "damage" })
+            doRoll({ name: sp.name, damage: rolls.damage, mode, kind: "damage" })
           )
         );
       }
@@ -2211,7 +2211,7 @@ const App = (() => {
       if (rolls.healing) {
         actions.appendChild(
           button(`Heal ${rolls.healing}`, "", (mode) =>
-            doRoll({ name: `${sp.name} healing`, damage: rolls.healing, mode, kind: "healing" })
+            doRoll({ name: sp.name, damage: rolls.healing, damageName: `${sp.name} healing`, mode, kind: "healing" })
           )
         );
       }
@@ -2221,7 +2221,7 @@ const App = (() => {
       for (const v of sp.variants || []) {
         actions.appendChild(
           button(`${v.roll} instead`, "", (mode) =>
-            doRoll({ name: `${sp.name} damage`, damage: v.roll, mode, kind: "damage" })
+            doRoll({ name: sp.name, damage: v.roll, mode, kind: "damage" })
           )
         ).title = `If ${v.when}`;
       }

@@ -2205,7 +2205,7 @@ const App = (() => {
       if (rolls.damage && !sp.requiresAttackRoll) {
         actions.appendChild(
           button(`Damage ${rolls.damage}`, "", (mode) =>
-            doRoll({ name: `${sp.name} damage`, damage: rolls.damage, mode, kind: "damage" })
+            doRoll({ name: sp.name, damage: rolls.damage, mode, kind: "damage" })
           )
         );
       }
@@ -2213,7 +2213,7 @@ const App = (() => {
       if (rolls.healing) {
         actions.appendChild(
           button(`Heal ${rolls.healing}`, "", (mode) =>
-            doRoll({ name: `${sp.name} healing`, damage: rolls.healing, mode, kind: "healing" })
+            doRoll({ name: sp.name, damage: rolls.healing, damageName: `${sp.name} healing`, mode, kind: "healing" })
           )
         );
       }
@@ -2223,7 +2223,7 @@ const App = (() => {
       for (const v of sp.variants || []) {
         actions.appendChild(
           button(`${v.roll} instead`, "", (mode) =>
-            doRoll({ name: `${sp.name} damage`, damage: v.roll, mode, kind: "damage" })
+            doRoll({ name: sp.name, damage: v.roll, mode, kind: "damage" })
           )
         ).title = `If ${v.when}`;
       }
@@ -2554,6 +2554,30 @@ const App = (() => {
       });
       renderPending();
     }
+  }
+
+  /**
+   * A roll sent from the D&D Beyond extension.
+   *
+   * It arrives as our own code rather than as bare dice, which is the whole
+   * reason for going through a Symbiote URL instead of `talespire://dice/`:
+   * everything the panel already does still applies — the roll mode, active
+   * effects like Bless, chat attribution to the linked mini, and the GM's
+   * damage inbox.
+   */
+  async function onLinkedRoll(msg) {
+    const name = msg.n || "Roll";
+    const isDamage = msg.d === 1;
+
+    toast(`${name} from D&D Beyond`);
+
+    // stage() names the damage group itself, so the bare name goes in here —
+    // passing "X damage" produced "X damage damage" in the tray.
+    await doRoll(
+      isDamage
+        ? { name, damage: msg.r, kind: "damage" }
+        : { name, roll: msg.r, kind: msg.k || "check" }
+    );
   }
 
   async function announce(text) {
@@ -2933,7 +2957,7 @@ const App = (() => {
     });
   }
 
-  return { boot, wire, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, state };
+  return { boot, wire, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onLinkedRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, state };
 })();
 
 // ---------------------------------------------------------------------------
@@ -2984,10 +3008,57 @@ function onInitiativeEvent(event) {
  * Scaffolding for the link probe — see lib/linkprobe.js. If this proves out, it
  * becomes the door a browser extension knocks on.
  */
+/**
+ * base64url back to an object, or null if this isn't one of ours.
+ *
+ * TaleSpire hands over the raw URL segment still percent-encoded, which is the
+ * mistake the link probe made twice — decode before anything else touches it.
+ */
+function decodeLinkMessage(text) {
+  let raw = String(text || "");
+  if (raw.includes("%")) {
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const b64 = raw.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(escape(atob(b64)));
+    const msg = JSON.parse(json);
+    return msg && msg.t ? msg : null;
+  } catch {
+    return null; // not base64, not JSON — the probe can still log it
+  }
+}
+
+/** Pull the payload out of whatever shape the event has. */
+function linkPayloadOf(event) {
+  const strings = [];
+  (function walk(node, depth) {
+    if (node == null || depth > 4) return;
+    if (typeof node === "string") return void strings.push(node);
+    if (typeof node !== "object") return;
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "kind") continue;
+      walk(v, depth + 1);
+    }
+  })(event, 0);
+  return strings.sort((a, b) => b.length - a.length)[0] || "";
+}
+
 function onUrlMessage(event) {
-  // The whole event goes to the probe, which digs the payload out itself —
-  // picking the field here is what produced a run of "0 chars" arrivals.
   console.log("[Spirekeeper] url message", event);
+
+  const msg = decodeLinkMessage(linkPayloadOf(event));
+  if (msg?.t === "roll") {
+    App.onLinkedRoll(msg);
+    return;
+  }
+
+  // Anything we don't recognise still goes to the probe, which is what makes a
+  // malformed message diagnosable rather than silently ignored.
   LinkProbe.received(event);
 }
 
