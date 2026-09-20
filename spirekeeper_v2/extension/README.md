@@ -65,11 +65,10 @@ error paths (private without a session, private with the wrong account, 404,
 Symbiote's normalizer — producing AC 18 / HP 33 / DC 13 with all four Twilight
 Domain spells, identical to a manual paste.
 
-Not yet verified, because it needs the extension actually installed: the real
-`chrome.tabs` call, the real clipboard write, and the session token path with a
-genuine `CobaltSession` cookie. **The private-character case is the one to try
-first** — it is the whole point, and the only part that cannot be tested from
-outside a browser profile that is signed in.
+Confirmed in a real install: `chrome.tabs`, the clipboard write, and the session
+token path. The popup reports "Read using your signed-in session" for **both
+public and private** characters, and a private character imports — so the
+"set privacy to Public" requirement is gone.
 
 ## Next
 
