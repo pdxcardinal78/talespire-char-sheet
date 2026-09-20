@@ -686,7 +686,7 @@ await TS.dice.sendDiceResult([results.resultsGroups[keep]], rollId);</code></pre
       <table>
         <thead><tr><th>Unauthenticated request</th><th class="num">Status</th><th>Response</th></tr></thead>
         <tbody>
-          <tr><td><code>/character/v5/character/100000001</code></td><td class="num"><span class="chip ok">200</span></td><td>A real Public sheet — 410&nbsp;KB, complete, no auth</td></tr>
+          <tr><td><code>/character/v5/character/123456789</code></td><td class="num"><span class="chip ok">200</span></td><td>A real Public sheet — 410&nbsp;KB, complete, no auth</td></tr>
           <tr><td><code>/character/v5/character/1</code></td><td class="num"><span class="chip stop">403</span></td><td><code>"Unauthorized Access Attempt."</code> — the sheet exists but isn't public</td></tr>
           <tr><td>Four other IDs probed</td><td class="num"><span class="chip warn">404</span></td><td>Resource not found — the service answers anonymously, it just gates content</td></tr>
           <tr><td>Any request with an <code>Origin</code> header</td><td class="num"><span class="chip stop">—</span></td><td>No <code>Access-Control-Allow-Origin</code> in the response</td></tr>

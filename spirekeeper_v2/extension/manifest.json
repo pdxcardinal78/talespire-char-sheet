@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Spirekeeper Importer",
+  "version": "0.1.0",
+  "description": "Copy a D&D Beyond character straight into Spirekeeper, including private ones.",
+  "permissions": [
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.dndbeyond.com/*"
+  ],
+  "action": {
+    "default_title": "Copy this character for Spirekeeper",
+    "default_popup": "popup.html"
+  }
+}

@@ -28,9 +28,10 @@ if (!input) {
 const output = args.includes("--out") ? args[args.indexOf("--out") + 1] : input;
 
 // Deliberately obvious stand-ins: anyone reading the fixture should be able to
-// tell at a glance that it is not somebody's real character.
+// tell at a glance that it is not somebody's real character. Check any id you
+// invent — 100000001 looked synthetic and belongs to a real D&D Beyond user.
 const FAKE = {
-  characterId: 100000001,
+  characterId: 123456789,
   userId: 200000001,
   username: "ExampleWarden",
   name: "Doran Stoneborne",

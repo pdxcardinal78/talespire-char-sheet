@@ -1,11 +1,81 @@
-# Extension (not started)
+# Spirekeeper Importer
 
-The Chrome/Firefox extension goes here. See `../README.md` for the measured
-constraints it has to work within, and the main README's "Link probe" section
-for how they were established.
+A browser extension that copies a D&D Beyond character straight into
+Spirekeeper's import box — **including private ones**.
 
-First slice, when it starts: the importer. It reads the character with the
-user's own D&D Beyond session — which removes both the copy-paste and the
-"set privacy to Public" step — and hands it to the panel via the clipboard.
-Rolling comes second; Beyond the Spire already does that part well, and it is
-the half that breaks when D&D Beyond redesigns its sheet.
+## What it replaces
+
+Importing today is four steps: paste the character link, press **Get JSON URL**,
+open that URL in a browser, select all, copy, paste back. And the character has
+to be set to **Public** first, which is a real concession — it makes the sheet
+readable by anyone with the link.
+
+Both exist for the same reason: D&D Beyond sends no CORS headers, so a Symbiote
+running at a file origin is refused outright. An extension is not subject to
+that, and it carries the user's own session.
+
+So this becomes: open the character, click the toolbar button, click **Copy**,
+paste. No public toggle.
+
+## Loading it
+
+Not packaged yet — load it unpacked:
+
+1. Chrome → `chrome://extensions`, enable **Developer mode**
+2. **Load unpacked** → pick `spirekeeper_v2/extension`
+3. Open a D&D Beyond character page and click the toolbar button
+
+Firefox is `about:debugging` → **This Firefox** → **Load Temporary Add-on**,
+pointing at `manifest.json`. The manifest is MV3 with no background worker, so
+it should load on both without changes.
+
+## How it works
+
+Two requests, both to D&D Beyond, nothing else leaves the machine.
+
+1. `POST auth-service.dndbeyond.com/v1/cobalt-token` with the browser's session
+   cookie, which returns a short-lived bearer token. This is what D&D Beyond's
+   own site does. Signed out, it answers `{"token": null}` rather than an error —
+   so a missing token means "not signed in", not "request failed", and a public
+   character still imports fine in that state.
+2. `GET character-service.dndbeyond.com/character/v5/character/<id>`, with the
+   token as a bearer if there was one.
+
+The popup shows the character's name, species, class and level before you copy,
+so you can see it got the right one without switching to TaleSpire first. It
+also says whether your session was used or whether the character was simply
+public — the difference matters when something later goes wrong.
+
+## Files
+
+| | |
+|---|---|
+| `manifest.json` | MV3. `activeTab` for the current URL, host permissions for `*.dndbeyond.com`. No `cookies` permission — `credentials: "include"` carries the session on its own, and asking for less means a smaller install prompt |
+| `ddb.js` | URL parsing, the token exchange, the fetch, and the summary line |
+| `popup.html` / `popup.css` / `popup.js` | The popup. Palette matches the Symbiote's |
+
+`ddb.js` exports for CommonJS too, so its logic is testable from Node against
+the live API without loading the extension.
+
+## Status
+
+Verified: URL parsing across the shapes D&D Beyond uses, the live fetch, the
+error paths (private without a session, private with the wrong account, 404,
+500, non-character page), and the copied string surviving `JSON.parse` and the
+Symbiote's normalizer — producing AC 18 / HP 33 / DC 13 with all four Twilight
+Domain spells, identical to a manual paste.
+
+Not yet verified, because it needs the extension actually installed: the real
+`chrome.tabs` call, the real clipboard write, and the session token path with a
+genuine `CobaltSession` cookie. **The private-character case is the one to try
+first** — it is the whole point, and the only part that cannot be tested from
+outside a browser profile that is signed in.
+
+## Next
+
+Rolling. Deliberately second: Beyond the Spire already does it well, and it is
+the half that breaks whenever D&D Beyond restyles its sheet. When it happens it
+should go over a Symbiote URL rather than `talespire://dice/`, so rolls arrive
+as Spirekeeper's own code and keep advantage, chat attribution and the GM's
+damage inbox working. See the main README's link-probe section for the measured
+limits — 1984 characters per message, base64url only.

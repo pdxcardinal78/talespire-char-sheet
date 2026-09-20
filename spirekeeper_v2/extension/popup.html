@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Spirekeeper Importer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>Spirekeeper</h1>
+
+  <div id="state" class="state">
+    <p class="status" id="status">Looking for a character…</p>
+  </div>
+
+  <div id="found" class="found hidden">
+    <p class="char-name" id="char-name"></p>
+    <p class="char-line" id="char-line"></p>
+    <button id="copy" class="btn btn-primary">Copy for Spirekeeper</button>
+    <p class="hint" id="hint"></p>
+  </div>
+
+  <p class="foot">Paste into Spirekeeper's import box in TaleSpire.</p>
+
+  <script src="ddb.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

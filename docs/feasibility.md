@@ -23,12 +23,12 @@ URL-based D&D Beyond import added behind a server-side adapter.
 
 ## 0. Live probe against a real sheet
 
-Tested against `https://www.dndbeyond.com/characters/100000001` (Doran Stoneborne, Dwarf Cleric 2),
+Tested against `https://www.dndbeyond.com/characters/123456789` (Doran Stoneborne, Dwarf Cleric 2),
 set to Public, on 2026-09-13.
 
 | Check | Result |
 |---|---|
-| `GET character-service…/character/100000001` | **200**, 410 KB of JSON, ~0.65 s |
+| `GET character-service…/character/123456789` | **200**, 410 KB of JSON, ~0.65 s |
 | `Access-Control-Allow-Origin` on success | **Absent** — a server-side adapter is mandatory, confirmed |
 | `ETag` / `Last-Modified` / `Cache-Control` | **All absent** — no conditional requests possible |
 | Repeat requests | No rate limiting observed over a short burst |
@@ -252,7 +252,7 @@ Probed 2026-09-13 (unauthenticated):
 
 | Request | Result |
 |---|---|
-| `.../character/100000001` (a real Public sheet) | `200` — 410 KB, complete character, ~0.65 s |
+| `.../character/123456789` (a real Public sheet) | `200` — 410 KB, complete character, ~0.65 s |
 | `.../character/1` | `403` — `{"serverMessage":"Unauthorized Access Attempt."}` |
 | `.../character/138467`, `4183498`, `71862959`, `100000000` | `404` — resource not found |
 | Any response, with `Origin:` header set | **No `Access-Control-Allow-Origin` header** |
