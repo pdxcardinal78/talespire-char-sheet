@@ -10,10 +10,12 @@
 #   ./dev/install.sh --copy
 #   ./dev/install.sh --path "/some/other/Symbiotes"
 #
-# A second build installs alongside the first under its own name, so the
-# shipping mod stays playable while the next one is worked on:
+# --src and --name install a second build alongside the first under its own
+# name, so the shipping mod stays playable while another is worked on. That
+# needs the other build to carry its own interop id, or the two will receive
+# each other's messages:
 #
-#   ./dev/install.sh --src spirekeeper_v2/symbiote --name "Spirekeeper v2"
+#   ./dev/install.sh --src some/other/symbiote --name "Spirekeeper next"
 
 set -euo pipefail
 

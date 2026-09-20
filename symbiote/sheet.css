@@ -1061,3 +1061,22 @@ textarea {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* ---------- import: extension first, manual as fallback ---------- */
+
+.import-main { margin-top: 14px; }
+.import-main .step-label { font-size: 15px; }
+
+/* The manual route is still three fiddly steps; folding it away keeps the
+   common path to one paste without deleting the fallback. */
+.import-manual {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bg-2);
+}
+.import-manual > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+.import-manual > summary:hover { color: var(--fg); }
+.import-manual .steps { margin-top: 12px; }

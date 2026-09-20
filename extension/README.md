@@ -22,7 +22,7 @@ paste. No public toggle.
 Not packaged yet — load it unpacked:
 
 1. Chrome → `chrome://extensions`, enable **Developer mode**
-2. **Load unpacked** → pick `spirekeeper_v2/extension`
+2. **Load unpacked** → pick the `extension` folder
 3. Open a D&D Beyond character page and click the toolbar button
 
 Firefox is `about:debugging` → **This Firefox** → **Load Temporary Add-on**,
@@ -100,7 +100,7 @@ The working implementation is in git history if the constraint ever lifts:
 `rolls.js` read 45 of 45 buttons off a live sheet, `content.js` intercepted
 clicks ahead of D&D Beyond's own menu, and the panel staged the result with roll
 mode and effects applied. Re-test the Symbiote verb after a TaleSpire update
-using the link probe in `spirekeeper_v2/symbiote`.
+using the link probe kept in `dev/attic/`.
 
 ## Next
 

@@ -18,6 +18,7 @@ symbiote/           the Symbiote itself — this folder is what TaleSpire loads
 prototype/
   normalize-cli.js  run the normalizer from the terminal against a saved payload
   sample-character.json   # a real D&D Beyond export, identities scrubbed
+extension/          the browser importer, loaded unpacked into Chrome or Firefox
 dev/install.sh      symlink the Symbiote into TaleSpire's folder for hot reload
 docs/               feasibility research
 ```
@@ -585,8 +586,9 @@ are stored by slug and re-read from the shipped file.
 ## Link probe: could a browser extension drive this?
 
 Scaffolding that has been removed from the shipping mod now that it answered
-its question. It survives in `spirekeeper_v2/symbiote/lib/linkprobe.js`, where
-the rolling work needs the same `onUrlMessage` door it was built to test.
+its question. It is kept in `dev/attic/linkprobe.js` with instructions for
+putting it back, because it is the tool for re-testing the finding below if a
+TaleSpire update ever changes it.
 
 TaleSpire registers a `talespire://` protocol handler. Two verbs matter:
 

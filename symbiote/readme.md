@@ -4,13 +4,19 @@ Import a D&D Beyond character and play it from the TaleSpire side panel.
 
 ## Importing a character
 
-1. On D&D Beyond, set the character's privacy to **Public**.
-2. Paste the character link into the panel and press **Get JSON URL**.
-3. Open that URL in your browser, copy the JSON, and paste it back into the panel.
+Install the **Spirekeeper** browser extension, then:
 
-D&D Beyond serves no CORS headers, so this panel cannot fetch the URL itself. The
-copy-paste step is the price of needing no server at all — nothing about your
-character leaves your machine.
+1. Open your character on D&D Beyond.
+2. Click the Spirekeeper toolbar button, then **Copy**.
+3. Paste into the box above and press **Import character**.
+
+Private characters work — the extension reads them with your own signed-in
+session, so there is no need to make anything public.
+
+Without the extension there is a manual route under **No extension? Import by
+hand**, which does need the character set to Public. Both exist because D&D
+Beyond serves no CORS headers: this panel cannot fetch a character itself, and
+an extension can. Either way nothing about your character leaves your machine.
 
 Characters are stored in TaleSpire's own storage and stay available across campaigns.
 

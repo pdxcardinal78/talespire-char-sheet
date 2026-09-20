@@ -17,7 +17,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = resolve(ROOT, "spirekeeper_v2/extension/icons");
+const OUT = resolve(ROOT, "extension/icons");
 const SIZES = [16, 32, 48, 128];
 const SS = 4; // supersampling factor
 
@@ -169,4 +169,4 @@ for (const size of SIZES) {
   writeFileSync(resolve(OUT, `icon-${size}.png`), png);
   console.log(`  icon-${size}.png  ${png.length} bytes`);
 }
-console.log(`written to spirekeeper_v2/extension/icons/`);
+console.log(`written to extension/icons/`);

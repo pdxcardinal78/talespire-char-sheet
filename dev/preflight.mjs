@@ -7,7 +7,7 @@
  * here is faster than round-tripping through the game.
  *
  *   node dev/preflight.mjs                          # the shipping Symbiote
- *   node dev/preflight.mjs spirekeeper_v2/symbiote  # any other build
+ *   node dev/preflight.mjs some/other/symbiote    # any other build
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -228,30 +228,6 @@ if (needsInterop && !interopId) {
     warn(`api.interop.id "${interopId}" is not a well-formed UUIDv4`);
   } else {
     pass("interop id is a valid UUIDv4");
-  }
-}
-
-// --- the extension's target --------------------------------------------------
-//
-// The browser extension addresses this Symbiote by interop id, baked into
-// link.js. If the two drift apart, every roll is launched successfully by the
-// browser and lands nowhere — Chrome reports success, the panel reports
-// nothing, and there is no error anywhere to follow. Exactly the silent kind
-// this file exists to catch.
-
-const extensionLink = join(dirname(DIR), "extension", "link.js");
-if (existsSync(extensionLink) && interopId) {
-  const src = readFileSync(extensionLink, "utf8");
-  const declared = src.match(/INTEROP_ID\s*=\s*["']([^"']+)["']/)?.[1];
-  if (!declared) {
-    warn("extension/link.js has no INTEROP_ID to check against the manifest");
-  } else if (declared !== interopId) {
-    fail(
-      `extension/link.js targets interop id ${declared} but this Symbiote's is ${interopId} — ` +
-        "rolls would launch successfully and arrive nowhere"
-    );
-  } else {
-    pass("extension targets this Symbiote's interop id");
   }
 }
 

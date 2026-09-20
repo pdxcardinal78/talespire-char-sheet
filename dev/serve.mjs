@@ -10,7 +10,7 @@
  *   node dev/serve.mjs                                    # http://localhost:8777/sheet.html
  *   node dev/serve.mjs --port 9000
  *   node dev/serve.mjs --open                             # and launch a browser at it
- *   node dev/serve.mjs --root spirekeeper_v2/symbiote --port 8778
+ *   node dev/serve.mjs --root some/other/symbiote --port 8778
  *
  * Two builds can be served at once on different ports, which is the point of
  * --root: compare v1 and v2 side by side without reinstalling either.

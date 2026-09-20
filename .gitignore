@@ -1,20 +1,17 @@
 # TaleSpire writes Symbiote debug logs into the Symbiote folder itself
 symbiote/.debug/
-spirekeeper_v2/symbiote/.debug/
 
 # ...and the Symbiote's stored data, which is the player's characters and
 # encounters. It must never be committed or shipped with the mod. Each installed
 # build keeps its own, so every build needs its own line here.
 symbiote/.localStorage/
-spirekeeper_v2/symbiote/.localStorage/
 
 # Scratch copies used when driving the extension popup in a browser
-spirekeeper_v2/extension/_fixture.json
-spirekeeper_v2/extension/_uitest.html
+extension/_fixture.json
+extension/_uitest.html
 
 # Scratch copies used when driving the panel in a browser
 symbiote/_devsample.json
-spirekeeper_v2/symbiote/_devsample.json
 
 .DS_Store
 node_modules/

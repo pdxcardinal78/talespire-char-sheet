@@ -12,37 +12,48 @@
   <h1>Spirekeeper</h1>
   <p class="lede">Bring a D&amp;D Beyond character into TaleSpire. <span id="app-version" class="version"></span></p>
 
-  <ol class="steps">
-    <li>
-      <span class="step-label">Paste the character link</span>
-      <div class="row">
-        <input id="ddb-link" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
-        <button id="resolve-link" class="btn">Get JSON URL</button>
-      </div>
-      <p class="hint">The character's privacy must be set to <b>Public</b> on D&amp;D Beyond.</p>
-    </li>
+  <!-- The extension is the way in now: it reads the character with the player's
+       own D&D Beyond session, so there is no copy-paste of a JSON URL and no
+       requirement to make the character public. The manual route stays for
+       anyone who hasn't installed it, but it is no longer the headline. -->
+  <div class="import-main">
+    <label class="step-label" for="json-input">Paste what the extension copied</label>
+    <textarea id="json-input" placeholder="Paste here, or drop a .json file anywhere on this panel" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="import-json" class="btn btn-primary">Import character</button>
+      <span id="import-status" class="status"></span>
+    </div>
+    <p class="hint">
+      Open your character on D&amp;D Beyond, click the <b>Spirekeeper</b> toolbar button,
+      then <b>Copy</b>. Private characters work — it uses your signed-in session.
+    </p>
+  </div>
 
-    <li id="step-fetch" class="dimmed">
-      <span class="step-labelup">Open that URL and copy the JSON</span>
-      <div class="row">
-        <code id="json-url" class="url">—</code>
-        <button id="copy-url" class="btn" disabled>Copy</button>
-      </div>
-      <p class="hint">
-        D&amp;D Beyond sends no CORS headers, so this panel can't fetch the URL itself.
-        Open it in your browser, select all, and copy. A hosted adapter removes this step later.
-      </p>
-    </li>
+  <details class="import-manual">
+    <summary>No extension? Import by hand</summary>
+    <ol class="steps">
+      <li>
+        <span class="step-label">Paste the character link</span>
+        <div class="row">
+          <input id="ddb-link" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
+          <button id="resolve-link" class="btn">Get JSON URL</button>
+        </div>
+        <p class="hint">This route needs the character set to <b>Public</b> on D&amp;D Beyond. The extension does not.</p>
+      </li>
 
-    <li>
-      <span class="step-label">Paste the JSON here</span>
-      <textarea id="json-input" placeholder="Paste the full character JSON, or drop a .json file anywhere on this panel" spellcheck="false"></textarea>
-      <div class="row">
-        <button id="import-json" class="btn btn-primary">Import character</button>
-        <span id="import-status" class="status"></span>
-      </div>
-    </li>
-  </ol>
+      <li id="step-fetch" class="dimmed">
+        <span class="step-label">Open that URL and copy the JSON</span>
+        <div class="row">
+          <code id="json-url" class="url">—</code>
+          <button id="copy-url" class="btn" disabled>Copy</button>
+        </div>
+        <p class="hint">
+          D&amp;D Beyond sends no CORS headers, so this panel can't fetch the URL itself.
+          Open it in your browser, select all, copy, and paste it above.
+        </p>
+      </li>
+    </ol>
+  </details>
 
   <div id="library" class="library hidden">
     <h2>Imported characters</h2>
