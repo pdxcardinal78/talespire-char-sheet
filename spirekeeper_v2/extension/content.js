@@ -98,12 +98,36 @@
     }
   });
 
-  // One line on load, so "is the content script even running?" is answerable
-  // from the page's own devtools console. An earlier attempt set a flag on
-  // `window` for the popup to read, which cannot work: a content script's
-  // `window` belongs to its isolated world and nothing outside can see it.
-  console.log(
-    `[Spirekeeper] content script ready — ${SpirekeeperRolls.all().length} rollable buttons found, ` +
-      `interception ${state.on ? "ON" : "OFF"}`
-  );
+  /**
+   * Report what we can see, once there is anything to see.
+   *
+   * D&D Beyond is a React app: at `document_idle` the sheet has not rendered
+   * and the count is always zero. Reporting that reads as "the hook is broken"
+   * when nothing is wrong — the click listener is delegated from `document`, so
+   * buttons that appear later are caught regardless. Waiting for the first ones
+   * to exist makes the line mean what it says.
+   *
+   * It gives up after ten seconds rather than watching forever, because a sheet
+   * that never renders is worth reporting too.
+   */
+  function reportWhenReady() {
+    const started = Date.now();
+
+    const report = (count) =>
+      console.log(
+        `[Spirekeeper] content script ready — ${count} rollable buttons, ` +
+          `interception ${state.on ? "ON" : "OFF"}` +
+          (count === 0 ? " (sheet may still be loading; clicks are caught either way)" : "")
+      );
+
+    const tick = () => {
+      const count = SpirekeeperRolls.all().length;
+      if (count > 0) return report(count);
+      if (Date.now() - started > 10000) return report(0);
+      setTimeout(tick, 400);
+    };
+    tick();
+  }
+
+  reportWhenReady();
 })();
