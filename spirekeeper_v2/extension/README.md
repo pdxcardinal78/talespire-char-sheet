@@ -115,8 +115,29 @@ D&D Beyond with advantage set and Bless active stages:
 — two d20s to compare and a separate buff die, thrown quietly so the panel can
 report the surviving one. A raw `talespire://dice/` URL can do none of that.
 
-Still to verify in a real install: the click interception itself, and the
-protocol handler firing from a content script's hidden iframe.
+### Launching the URL
+
+Chrome only launches an external protocol while a real user gesture is live,
+and it is strict about what counts. Two plausible methods are both refused with
+*"Not allowed to launch … because a user gesture is required"*:
+
+| Method | Why it fails |
+|---|---|
+| `a.click()` on a created anchor | a synthesised click is `isTrusted: false` and carries no activation, even inside a real handler |
+| hidden `iframe.src` | a subframe navigating to an external protocol is the case browsers hardened against |
+
+What works is a direct `window.location.href = url` during the real click.
+It does **not** navigate the page — for a registered custom scheme the browser
+hands off to the handler and the document stays put. Verified on a live sheet:
+`navigator.userActivation.isActive` true, no refusal, sheet still loaded.
+
+Only one method fires. Trying several "to be safe" would send the same roll
+twice the moment more than one is permitted, and two sets of dice in someone's
+game is a worse failure than none.
+
+The call must be synchronous from the click handler; anything awaited first
+spends the activation. `open()` warns when activation has already gone, because
+Chrome's own message names the cause but not the culprit.
 
 ## Next
 

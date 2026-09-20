@@ -62,56 +62,45 @@ const Link = (() => {
   }
 
   /**
-   * Hand a URL to the operating system without leaving the page.
+   * Hand a URL to the operating system.
    *
-   * A custom scheme does not navigate the page: the browser hands it to the
-   * registered handler and the document stays put. What varies is *which* way
-   * of asking Chrome will honour, and the rules differ by version and by
-   * whether user activation is still in scope — so this tries the reliable one
-   * first and falls back rather than betting everything on one mechanism.
+   * Chrome will only launch an external protocol while a real user gesture is
+   * live, and it is strict about what counts. Two plausible-looking methods are
+   * both refused with "Not allowed to launch … because a user gesture is
+   * required":
    *
-   * Order matters. A synthesised click on a real anchor is the same path as a
-   * person clicking a link, which is the case browsers are least likely to
-   * block; external-protocol launches from a subframe are the case they are
-   * most likely to block, so the iframe is the fallback, not the default.
+   *   a.click()     a synthesised click is isTrusted:false and carries no
+   *                 activation, even when fired from inside a real handler
+   *   iframe.src    a subframe navigating to an external protocol is exactly
+   *                 the case browsers hardened against
    *
-   * Must be called synchronously from the click handler. Anything awaited
-   * first spends the user activation and the launch is refused.
+   * A direct assignment to `location` during the real click is what works. It
+   * does not navigate the page: for a registered custom scheme the browser
+   * hands off to the handler and the document stays where it is.
+   *
+   * Only one method fires. Trying several "to be safe" would send the same roll
+   * more than once the moment more than one of them is permitted — two sets of
+   * dice in someone's game is a worse failure than none.
+   *
+   * Must be called synchronously from the click handler; anything awaited first
+   * spends the activation.
    */
   function open(url) {
-    const attempts = [];
-
-    try {
-      const a = document.createElement("a");
-      a.href = url;
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      attempts.push("anchor");
-    } catch (e) {
-      attempts.push(`anchor failed: ${e.message}`);
+    const active = navigator.userActivation?.isActive;
+    if (active === false) {
+      // Worth saying out loud, because Chrome's own refusal names the cause but
+      // not the culprit, and the culprit is always "something awaited first".
+      console.warn("[Spirekeeper] no user activation left — the launch will be refused");
     }
-
-    try {
-      const frame = document.createElement("iframe");
-      frame.style.display = "none";
-      frame.src = url;
-      document.body.appendChild(frame);
-      setTimeout(() => frame.remove(), 1000);
-      attempts.push("iframe");
-    } catch (e) {
-      attempts.push(`iframe failed: ${e.message}`);
-    }
-
-    console.log("[Spirekeeper] sent", url.length, "chars via", attempts.join(" + "));
-    return attempts;
+    window.location.href = url;
+    return "location";
   }
 
   function sendRoll(roll) {
     const url = urlFor(rollMessage(roll));
-    console.log("[Spirekeeper] roll ->", roll, url);
-    return open(url);
+    const how = open(url);
+    console.log(`[Spirekeeper] ${roll.name} ${roll.roll} -> ${url.length} chars via ${how}`);
+    return how;
   }
 
   return { INTEROP_ID, PREFIX, MAX_PAYLOAD, encode, rollMessage, urlFor, open, sendRoll };
