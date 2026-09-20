@@ -1,0 +1,59 @@
+{
+  "manifestVersion": 1,
+  "name": "Spirekeeper",
+  "version": "0.10.6",
+  "summary": "Play a D&D Beyond character in TaleSpire, and run the party and its monsters as GM.",
+  "license": "MIT",
+  "entryPoint": "/sheet.html",
+  "descriptionFilePath": "/readme.md",
+  "about": {
+    "authors": [
+      "Ryan Johnson"
+    ]
+  },
+  "api": {
+    "version": "0.1",
+    "initTimeout": 10,
+    "interop": {
+      "id": "6f1c9d84-2a77-4f3e-9b25-0d8a4c1e77b2"
+    },
+    "subscriptions": {
+      "symbiote": {
+        "onStateChangeEvent": "onStateChangeEvent"
+      },
+      "creatures": {
+        "onCreatureSelectionChange": "onCreatureSelectionChange",
+        "onCreatureStateChange": "onCreatureStateChange"
+      },
+      "dice": {
+        "onRollResults": "onRollResults"
+      },
+      "picking": {
+        "onPickingEvent": "onPickingEvent"
+      },
+      "sync": {
+        "onSyncMessage": "onSyncMessage"
+      },
+      "initiative": {
+        "onInitiativeEvent": "onInitiativeEvent"
+      },
+      "urls": {
+        "onUrlMessage": "onUrlMessage"
+      }
+    }
+  },
+  "environment": {
+    "webViewBackgroundColor": "#1b1d22",
+    "capabilities": [
+      "runInBackground"
+    ],
+    "extras": [
+      "fonts",
+      "icons",
+      "colorStyles"
+    ]
+  },
+  "controls": {
+    "reload": true
+  }
+}

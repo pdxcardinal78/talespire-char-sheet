@@ -1,0 +1,845 @@
+<title>Spirekeeper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --bg:        #EDEFF4;
+    --surface:   #FFFFFF;
+    --raise:     #F6F7FA;
+    --ink:       #14171F;
+    --muted:     #5A6376;
+    --line:      #D5DAE4;
+    --line-soft: #E4E8EF;
+    --brass:     #8A5A16;
+    --brass-dim: #A87C3C;
+    --ok:        #2C7357;
+    --warn:      #8A6412;
+    --stop:      #9E3A2C;
+    --chip-ok:   #E2F0E9;
+    --chip-warn: #F5ECD5;
+    --chip-stop: #F7E3DF;
+
+    --display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #0E1119;
+      --surface:   #161A23;
+      --raise:     #1C212C;
+      --ink:       #E6EAF2;
+      --muted:     #949DB1;
+      --line:      #2A3140;
+      --line-soft: #212836;
+      --brass:     #DFA85C;
+      --brass-dim: #B08340;
+      --ok:        #56BE8C;
+      --warn:      #DCAE4C;
+      --stop:      #E0705D;
+      --chip-ok:   #14281F;
+      --chip-warn: #2A2213;
+      --chip-stop: #2C1917;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #0E1119;
+    --surface:   #161A23;
+    --raise:     #1C212C;
+    --ink:       #E6EAF2;
+    --muted:     #949DB1;
+    --line:      #2A3140;
+    --line-soft: #212836;
+    --brass:     #DFA85C;
+    --brass-dim: #B08340;
+    --ok:        #56BE8C;
+    --warn:      #DCAE4C;
+    --stop:      #E0705D;
+    --chip-ok:   #14281F;
+    --chip-warn: #2A2213;
+    --chip-stop: #2C1917;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    padding: 72px 0 36px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(40px, 7vw, 68px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 20px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  .byline {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+  }
+
+  /* ---------- verdict ---------- */
+
+  .verdict {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    margin: 40px 0 8px;
+    overflow: hidden;
+  }
+
+  .verdict > div {
+    background: var(--surface);
+    padding: 22px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .verdict dt {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .verdict dd {
+    margin: 0;
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 23px;
+    line-height: 1.15;
+    letter-spacing: -0.012em;
+  }
+
+  .verdict dd.go { color: var(--ok); }
+  .verdict dd.caution { color: var(--stop); }
+
+  .verdict p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 56px; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 30px;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+
+  h2 .num {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--brass);
+    letter-spacing: 0.08em;
+    margin-right: 12px;
+    vertical-align: 0.28em;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: -0.008em;
+    margin: 40px 0 4px;
+  }
+
+  .section-note {
+    color: var(--muted);
+    font-size: 15.5px;
+    margin: 0 0 26px;
+    max-width: 68ch;
+  }
+
+  p { max-width: 70ch; }
+
+  a {
+    color: var(--brass);
+    text-underline-offset: 2.5px;
+    text-decoration-thickness: 1px;
+  }
+
+  a:focus-visible {
+    outline: 2px solid var(--brass);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.84em;
+    background: var(--raise);
+    border: 1px solid var(--line-soft);
+    border-radius: 3px;
+    padding: 1px 5px;
+    word-break: break-word;
+  }
+
+  strong { font-weight: 600; }
+
+  /* ---------- tables ---------- */
+
+  .scroller {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+    margin: 22px 0;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 560px;
+    font-size: 15px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+  }
+
+  thead th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--raise);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td { border-bottom: 0; }
+
+  td.num, th.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  td code { background: transparent; border: 0; padding: 0; }
+
+  /* ---------- code blocks ---------- */
+
+  pre {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    background: var(--raise);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 16px 18px;
+    margin: 20px 0;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+
+  pre code { background: transparent; border: 0; padding: 0; font-size: inherit; }
+  pre .cmt { color: var(--muted); }
+
+  /* ---------- chips ---------- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 3px 8px 2px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+
+  .chip.ok   { background: var(--chip-ok);   color: var(--ok); }
+  .chip.warn { background: var(--chip-warn); color: var(--warn); }
+  .chip.stop { background: var(--chip-stop); color: var(--stop); }
+
+  /* ---------- callout ---------- */
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--brass);
+    border-radius: 3px;
+    padding: 20px 24px;
+    margin: 26px 0;
+  }
+
+  .callout p { margin: 0; max-width: 66ch; }
+  .callout p + p { margin-top: 12px; }
+
+  .callout .label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 8px;
+  }
+
+  .callout.alarm { border-left-color: var(--stop); }
+  .callout.alarm .label { color: var(--stop); }
+
+  /* ---------- limits list ---------- */
+
+  ol.limits, ol.checks {
+    counter-reset: item;
+    list-style: none;
+    padding: 0;
+    margin: 22px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  ol.limits > li, ol.checks > li {
+    counter-increment: item;
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 14px;
+    max-width: 74ch;
+  }
+
+  ol.limits > li::before, ol.checks > li::before {
+    content: counter(item, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--brass);
+    padding-top: 5px;
+  }
+
+  ol.limits b, ol.checks b {
+    font-family: var(--display);
+    font-weight: 700;
+    letter-spacing: -0.005em;
+  }
+
+  ol.limits ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    color: var(--muted);
+    font-size: 15.5px;
+  }
+
+  /* ---------- pipeline ---------- */
+
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    margin: 26px 0;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  .stage {
+    padding: 20px 20px 22px;
+    border-right: 1px solid var(--line-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+  }
+
+  .stage:last-child { border-right: 0; }
+
+  .stage h4 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin: 0;
+  }
+
+  .stage ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 14.5px;
+    line-height: 1.35;
+  }
+
+  .stage li {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    background: var(--raise);
+    border: 1px solid var(--line-soft);
+    border-radius: 2px;
+    padding: 7px 9px;
+  }
+
+  .stage .hint { font-family: var(--body); font-size: 14px; color: var(--muted); }
+
+  @media (max-width: 760px) {
+    .pipeline { grid-template-columns: 1fr; }
+    .stage { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+    .stage:last-child { border-bottom: 0; }
+  }
+
+  /* ---------- sources ---------- */
+
+  .sources {
+    margin-top: 26px;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px 28px;
+    font-size: 15px;
+  }
+
+  .sources li { color: var(--muted); }
+
+  footer {
+    margin-top: 72px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">Feasibility research</div>
+    <h1>Spirekeeper</h1>
+    <p class="standfirst">Can a TaleSpire mod pull a character sheet in from D&amp;D Beyond — stats, gear, spells — and show it to the player and the DM inside the game?</p>
+    <div class="byline">
+      <span>Research date 2026-09-13</span>
+      <span>Endpoint probes run live</span>
+      <span>Target: mod.io + Thunderstore</span>
+    </div>
+  </header>
+
+  <dl class="verdict">
+    <div>
+      <dt>Verdict</dt>
+      <dd class="go">Feasible</dd>
+      <p>TaleSpire's side is officially supported and well documented. Nothing here needs a hack.</p>
+    </div>
+    <div>
+      <dt>Proven against</dt>
+      <dd>A real sheet</dd>
+      <p>A public character returned 410&nbsp;KB of complete JSON, and the prototype normalizer computes it correctly.</p>
+    </div>
+    <div>
+      <dt>What's left</dt>
+      <dd class="caution">Staying current,<br>staying allowed</dd>
+      <p>A server adapter is mandatory, refreshes are expensive, and the endpoint is still undocumented and ToS-adjacent.</p>
+    </div>
+  </dl>
+
+  <section id="probe">
+    <h2><span class="num">00</span>Live probe against a real sheet</h2>
+    <p class="section-note">Tested 2026-09-13 against a public D&amp;D Beyond character — Doran Stoneborne, a Dwarf Cleric 2 — fetched anonymously, parsed, and run through a prototype normalizer.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Check</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Fetch the character service</td><td><span class="chip ok">200</span> 410&nbsp;KB of JSON in ~0.65&nbsp;s</td></tr>
+          <tr><td><code>Access-Control-Allow-Origin</code> on success</td><td><span class="chip stop">Absent</span> A server-side adapter is mandatory — confirmed, not assumed</td></tr>
+          <tr><td><code>ETag</code> / <code>Last-Modified</code> / <code>Cache-Control</code></td><td><span class="chip stop">All absent</span> No conditional requests are possible</td></tr>
+          <tr><td>Repeat requests</td><td><span class="chip ok">Clean</span> No rate limiting over a short burst</td></tr>
+          <tr><td>Content completeness</td><td><span class="chip ok">Everything</span> Full spell text, item stats, modifier arrays, limited-use actions</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The import is trivial. Staying current is not.</h3>
+    <p>One HTTP call through a proxy yields the whole character; proving that took about thirty minutes. But with no cache validators, <strong>every freshness check is a full 410&nbsp;KB download</strong>. At the 10-second interval the old BeyondLink plugin used, that is roughly 2.5&nbsp;MB per minute per character — about 720&nbsp;MB an hour for a five-person party through one shared proxy.</p>
+    <p>Design for a manual re-import button plus a server-side <code>dateModified</code> comparison, not background polling. The payload carries <code>dateModified</code>, so your proxy can download, compare, and tell clients "unchanged" cheaply on your side of the wire.</p>
+
+    <div class="callout">
+      <span class="label">The campaign roster is in there. We're ignoring it.</span>
+      <p>The payload embeds a <code>campaign</code> object listing every character in the D&amp;D Beyond campaign, each with its ID, name and player username. Skipping it is the right call: characters frequently aren't attached to a D&amp;D Beyond campaign at all, so the field is often simply absent; a campaign roster is not the same set of people as tonight's session; and pulling sheets nobody asked you to pull is the wrong default.</p>
+      <p><strong>Each player imports their own link.</strong> That becomes a privacy stance you can state plainly in the mod description — the adapter reads the one character it was given and discards the rest of the payload. Never logged, never persisted.</p>
+    </div>
+
+    <h3>The normalizer works</h3>
+    <p><code>prototype/ddb-normalize.mjs</code> turns the raw payload into a usable sheet. Every derived number below was computed from modifier arrays, not read out of a field:</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Derived</th><th class="num">Value</th><th>From</th></tr></thead>
+        <tbody>
+          <tr><td>Armour class</td><td class="num">18</td><td>Chain Mail 16, heavy so no Dex, + shield 2</td></tr>
+          <tr><td>Hit points</td><td class="num">23</td><td>13 base + 8 Con + 2 from a <code>hit-points-per-level</code> modifier</td></tr>
+          <tr><td>Constitution</td><td class="num">18</td><td>16 base + 2 from a background ASI feat</td></tr>
+          <tr><td>Spell save DC / attack</td><td class="num">13 / +5</td><td>8 + proficiency + Wis, resolved from the class's casting ability id</td></tr>
+          <tr><td>Level-1 slots</td><td class="num">3</td><td>Reconstructed from a class table — <em>not</em> in the payload</td></tr>
+          <tr><td>Channel Divinity</td><td class="num">2/2</td><td><code>actions.class[].limitedUse</code>, nowhere near <code>features</code></td></tr>
+          <tr><td>Club / Shortbow</td><td class="num">d20+4 · d20+2</td><td>Ability choice by weapon properties, + proficiency by category</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The long tail, made concrete</h3>
+    <p class="section-note">Every one of these surfaced in a single level-2 character. They are why the normalizer is measured in weeks rather than days.</p>
+
+    <ol class="limits">
+      <li><div><b>Spell slots aren't in the payload.</b> <code>spellSlots</code> reports <code>used</code> but leaves <code>available</code> at zero. The table has to be rebuilt from class levels — including multiclass combined progression, warlock <code>pactMagic</code>, half-casters and third-casters.</div></li>
+      <li><div><b>Modifiers carry prose restrictions.</b> The Dwarf's <code>advantage / saving-throws</code> modifier has <code>restriction: "to avoid or end the Poisoned condition"</code>. My first pass ignored that field and rendered advantage on <em>every</em> save — a confidently wrong sheet. Conditional modifiers have to surface as caveats, never fold into a number.</div></li>
+      <li><div><b>Ability scores arrive pre-split.</b> Con 18 is 16 + 2 from a feat; Wis 16 is 15 + 1. You sum <code>stats</code>, <code>bonusStats</code>, <code>overrideStats</code> and every <code>bonus / &lt;ability&gt;-score</code> modifier, then let <code>set</code> modifiers override the lot.</div></li>
+      <li><div><b>Rules-edition drift.</b> This is a 2024-rules character — Guide background, ASIs delivered as feats, a Club with the "Slow" property. The structure is stable across editions; the content is not.</div></li>
+      <li><div><b>Interactions nothing models for you.</b> Chain Mail imposes disadvantage on Stealth, and this character is proficient in Stealth. Nothing in the payload connects those two facts.</div></li>
+      <li><div><b>Live state rides along.</b> The sheet currently carries the Poisoned condition — worth knowing it's in there, intentional or not.</div></li>
+    </ol>
+  </section>
+
+  <section id="talespire">
+    <h2><span class="num">01</span>What TaleSpire already gives you</h2>
+    <p class="section-note">Symbiotes are TaleSpire's official modding system: a folder with a <code>manifest.json</code> and an HTML entry point, rendered in an embedded Chromium (currently v111) side panel. When the manifest declares an API version, TaleSpire injects the <code>TS</code> object on every page load.</p>
+
+    <div class="callout">
+      <span class="label">The manifest fact that shapes the whole project</span>
+      <p><code>entryPoint</code> accepts <em>either</em> a local path <em>or</em> a full remote URL. You can host the entire application on your own domain and ship a ~2&nbsp;KB manifest as the mod. Injection repeats on every page load, including remote pages, so a hosted app still gets the full <code>TS.*</code> surface.</p>
+      <p>That single field removes the CORS problem for your own backend, lets you ship updates without republishing the mod, and keeps secrets off the user's disk.</p>
+    </div>
+
+    <h3>The API surface that matters here</h3>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th>Namespace</th><th>What you get</th><th>Use in this project</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>TS.creatures</code></td><td><code>getSelectedCreatures</code>, <code>getMoreInfo</code> (stats, HP, name, owners, morphs), <code>createBlueprint</code></td><td>Bind a sheet to a mini; click a mini to switch sheets</td></tr>
+          <tr><td><code>TS.dice</code></td><td><code>makeRollDescriptors</code>, <code>putDiceInTray</code>, <code>evaluateDiceResultsGroup</code>, <code>sendDiceResult</code></td><td>Roll real TaleSpire dice straight from a sheet action</td></tr>
+          <tr><td><code>TS.chat</code></td><td><code>send</code>, <code>sendAsCreature</code>, rich text, 400-char cap</td><td>Post attack and save results in character</td></tr>
+          <tr><td><code>TS.sync</code></td><td>Realtime messaging between clients sharing an interop ID — 500 UTF-16 chars, 20 targets max</td><td>Party status digests, GM ↔ player handshakes</td></tr>
+          <tr><td><code>TS.localStorage</code></td><td>Global and campaign-scoped blobs, 5&nbsp;MB each</td><td>Store imported sheets with no backend at all</td></tr>
+          <tr><td><code>TS.players</code> / <code>TS.clients</code></td><td>GM rights versus current GM/player view mode</td><td>Gate the DM's party panel correctly</td></tr>
+          <tr><td><code>TS.urls</code></td><td><code>submit()</code> for <code>talespire://</code> URLs, inbound <code>talespire://symbiote/</code> messages</td><td>The only real write path back into the game</td></tr>
+          <tr><td>Event sources</td><td><code>onCreatureStateChange</code>, <code>onCreatureSelectionChange</code>, <code>onRollResults</code>, <code>onInitiativeEvent</code></td><td>Live updates without polling</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Limits to design around</h3>
+    <ol class="limits">
+      <li>
+        <div>
+          <b>The board is read-only to Symbiotes.</b> The docs are explicit — "Symbiotes can't do anything that gets saved to the board." There is no <code>setHp</code> or <code>setStats</code>. You can read a mini's HP and react to changes, but you cannot write the sheet's HP onto the mini.
+          <ul>
+            <li>Indirect writes that do work: <code>createBlueprint()</code> produces a <code>talespire://</code> URL that spawns a mini pre-loaded with name, HP and stats; <code>urls.submit()</code> can send <code>talespire://stat-names/</code> links to rename the campaign's stat slots; chat can carry anything.</li>
+            <li>Live write-back to an existing mini needs a BepInEx C# plugin instead — which is precisely why LordAshes' BeyondLink exists as a plugin and not a Symbiote.</li>
+          </ul>
+        </div>
+      </li>
+      <li><div><b>A mini holds eight named stats plus HP.</b> A full sheet will never live on the mini. The sheet lives in your Symbiote; the mini gets a projection — AC, passive perception, whatever the campaign names its slots.</div></li>
+      <li><div><b>Sync messages cap at 500 characters.</b> You cannot push a whole sheet through <code>TS.sync</code>. Send compact digests, or use your own backend — which a remotely hosted Symbiote can reach freely.</div></li>
+      <li><div><b>Symbiote-submitted dice are flagged</b> as possibly modified so GMs can cross-check. Prefer <code>putDiceInTray</code>: real dice, real physics, no flag, and you read the outcome from <code>onRollResults</code>.</div></li>
+      <li><div><b>Rate limiting is explicit</b> — excessive calls return <code>rateLimited</code>. Batch your <code>getMoreInfo</code> calls.</div></li>
+      <li><div><b>Navigation re-runs injection.</b> Build a one-pager that swaps content rather than a multi-page site.</div></li>
+    </ol>
+  </section>
+
+  <section id="interaction">
+    <h2><span class="num">02</span>What a click actually does</h2>
+    <p class="section-note">Three questions about in-game interaction, three different answers — and the differences matter more than the similarities.</p>
+
+    <h3>Targeting: supported natively</h3>
+    <p><code>TS.picking.startPicking()</code> switches the cursor into a pick mode; the user clicks something on the board and you get back <code>pickingCompleted { id, kindOfPicked, idOfPicked }</code>, where the kind is one of <code>creature</code>, <code>tile</code>, <code>prop</code> or <code>unknown</code>. "Click the goblin, then choose an attack" is a first-class flow, not a hack.</p>
+    <p>One constraint: only one picking operation can be open across all Symbiotes at once. A second call returns <code>toolInUse</code>, so handle that state rather than assuming the tool is yours.</p>
+
+    <h3>Reading the target's AC: permission-gated, and that's structural</h3>
+    <p><code>creatureInfo</code> exposes <code>stats: [{ name, value, max }]</code> alongside <code>hp</code>, so a target's AC is readable — but only when three things line up: the campaign spent one of its eight stat slots on AC, the mini has it filled in, and the client asking is allowed to see it. The docs are unambiguous:</p>
+
+    <div class="callout alarm">
+      <span class="label">From the API permissions model</span>
+      <p>"GMs (including players who can GM, but are in player mode currently) can see all the info on all the minis, players will only see data they themselves can find out through the TaleSpire UI, meaning most data is only visible on minis they own."</p>
+    </div>
+
+    <p><strong>A player's client cannot read an enemy's AC.</strong> Automatic hit/miss resolution is therefore a <em>DM-client feature</em>; on a player's client the same action degrades to "you rolled 17" with no verdict. That isn't engineering-around-able — it's the game's information model, and it matches how most tables already play.</p>
+
+    <h3>The loop can't close</h3>
+    <p>Even when the DM's client knows the attack hit and knows the damage, it cannot write HP onto the target — Symbiotes can't modify the board. The honest ceiling is <strong>pick target → roll → post a formatted result to chat → a human applies it</strong>. Automatic damage application is BepInEx-plugin territory.</p>
+
+    <h3>Named rolls: free</h3>
+    <p>Roll names are first-class in two places at once. <code>rollDescriptor</code> is literally <code>{ name, roll }</code>, and the dice-string grammar accepts <code>name:2d6+3</code> directly. Names appear in chat history and result pop-ups natively, and come back attached to <code>rollResultsGroup.name</code> — nothing to reconstruct.</p>
+    <p>Attack and damage can share a single throw using roll groups:</p>
+    <pre><code>Club attack:d20+4 / Club damage:1d4+2</code></pre>
+    <p>One set of dice hits the table; both results return labelled. Given TaleSpire's physical-dice presentation, prefer this to the sequential "roll to hit, then roll damage on a hit" pattern — two throws per attack gets tedious at the table.</p>
+    <p>Note that <code>putDiceInTray</code> <em>stages</em> dice "ready for the player to roll" — the player still throws them. There is no silent auto-roll except through <code>sendDiceResult</code>, which stamps the result as Symbiote-originated.</p>
+
+    <h3>Advantage and disadvantage: not native, but anticipated</h3>
+    <p>The dice grammar is deliberately basic — <code>+</code> and <code>-</code> only, no keep-highest, no rerolls, no exploding dice. The API was designed with this gap in mind, though: <code>evaluateDiceResultsGroup</code> exists, per its own docs, so you can handle groups separately <em>"to for example implement a 'keep highest group' function."</em></p>
+    <p>So advantage is two roll groups and a comparison:</p>
+    <pre><code><span class="cmt">// Roll d20+4 twice, evaluate each group, keep the higher.</span>
+const descs  = TS.dice.makeRollDescriptors("Attack:d20+4/Attack:d20+4");
+const rollId = await TS.dice.putDiceInTray(descs, true);   <span class="cmt">// quiet = true</span>
+
+<span class="cmt">// …later, in the rollResults handler for that rollId:</span>
+const totals = results.resultsGroups.map((g) =&gt; TS.dice.evaluateDiceResultsGroup(g));
+const keep   = totals.indexOf(Math.max(...totals));        <span class="cmt">// Math.min for disadvantage</span>
+await TS.dice.sendDiceResult([results.resultsGroups[keep]], rollId);</code></pre>
+
+    <p>The <code>quiet</code> flag is the designed-in other half. Quiet rolls hide the raw result from chat, and the docs state it is <em>"meant to work in conjunction with sendDiceResult so Symbiotes can 'override' the roll result, while retaining the GMs ability to cross check."</em> The GM gets an indicator they can click to see what was really rolled. <strong>The Symbiote tamper marker isn't a smell here — it's the sanctioned mechanism for exactly this.</strong></p>
+    <p>Two real d20s land on the table and everyone sees one kept result, which is visually perfect for advantage.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Approach</th><th>Chat output</th><th>Downside</th></tr></thead>
+        <tbody>
+          <tr><td>Loud — no quiet flag</td><td>Both group totals, then your summary line</td><td>Noisy and slightly confusing; the table sees a discarded number</td></tr>
+          <tr><td>Quiet + <code>sendDiceResult</code></td><td>One kept result</td><td>Every advantage roll carries the Symbiote marker</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Go quiet-and-override, and say so in the mod description so DMs know why the marker shows up.</p>
+
+    <h3>Where that leaves the interaction model</h3>
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Capability</th><th>Works?</th><th>Where</th></tr></thead>
+        <tbody>
+          <tr><td>Click a mini to target it</td><td><span class="chip ok">Yes</span></td><td>Any client</td></tr>
+          <tr><td>Click an attack, roll it with its name shown</td><td><span class="chip ok">Yes</span></td><td>Any client</td></tr>
+          <tr><td>Attack and damage in one throw</td><td><span class="chip ok">Yes</span></td><td>Any client</td></tr>
+          <tr><td>Advantage / disadvantage</td><td><span class="chip ok">Yes</span> ~a day's work</td><td>Any client</td></tr>
+          <tr><td>Auto hit/miss against target AC</td><td><span class="chip warn">Partly</span></td><td>DM client only, and only if AC occupies a stat slot</td></tr>
+          <tr><td>Apply damage to the target's HP</td><td><span class="chip stop">No</span></td><td>Needs a BepInEx plugin</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="data">
+    <h2><span class="num">03</span>The actual risk: getting the data out</h2>
+    <p class="section-note">D&amp;D Beyond has no supported, documented, public API. The endpoint every community tool uses is undocumented and unsupported: <code>https://character-service.dndbeyond.com/character/v5/character/{id}</code>.</p>
+
+    <h3>What it does today</h3>
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Unauthenticated request</th><th class="num">Status</th><th>Response</th></tr></thead>
+        <tbody>
+          <tr><td><code>/character/v5/character/100000001</code></td><td class="num"><span class="chip ok">200</span></td><td>A real Public sheet — 410&nbsp;KB, complete, no auth</td></tr>
+          <tr><td><code>/character/v5/character/1</code></td><td class="num"><span class="chip stop">403</span></td><td><code>"Unauthorized Access Attempt."</code> — the sheet exists but isn't public</td></tr>
+          <tr><td>Four other IDs probed</td><td class="num"><span class="chip warn">404</span></td><td>Resource not found — the service answers anonymously, it just gates content</td></tr>
+          <tr><td>Any request with an <code>Origin</code> header</td><td class="num"><span class="chip stop">—</span></td><td>No <code>Access-Control-Allow-Origin</code> in the response</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Two consequences. <strong>CORS blocks browser-side fetches</strong>, so a Symbiote page cannot call this directly — you need a server-side adapter, which is free if you're already hosting the app remotely. And <strong>only sheets set to Public are readable anonymously</strong>; "campaign only" and private sheets return 403. Reaching those means proxying the user's D&amp;D Beyond credentials (the <code>ddb-proxy</code> model behind Foundry's DDB-Importer) or reading the already-loaded page in the user's browser (the Beyond20 model, via extension).</p>
+
+    <div class="callout alarm">
+      <span class="label">The prior art is a warning</span>
+      <p>LordAshes shipped <strong>BeyondLink</strong> — poll a character URL, sync HP, max HP, AC, shield AC and hit dice into TaleSpire every ~10 seconds — and then marked it <strong>obsolete in favour of BeyondLinkViaChrome</strong>, which extracts the same data through a Chrome extension instead.</p>
+      <p>Someone who already solved this problem moved off the direct-URL approach. Plan for that ending.</p>
+    </div>
+
+    <h3>Where you stand legally</h3>
+    <p>D&amp;D Beyond's terms prohibit accessing the site "by means of any robot, spider, scraper, crawler or other automated means." Beyond20's long-standing defence is that it never touches D&amp;D Beyond's servers — it reads data already loaded in the user's own browser. Ranked by exposure, highest first: server-side proxy, client-side fetch with the user's credentials, browser extension reading the DOM, and finally <strong>the user pasting or uploading their own JSON</strong>, which carries none.</p>
+    <p>Separately: the character JSON embeds licensed spell and item text. Rendering a user's own data in their own client is one act; caching and redistributing it from your server is a different one. SRD 5.1/5.2 is CC-BY if you need reference data bundled.</p>
+
+    <h3>Other sheet sources, ranked by friction</h3>
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Source</th><th>System</th><th>Access</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><strong>File drop / paste</strong></td><td>Anything</td><td><span class="chip ok">Open</span></td><td>Always works, no ToS surface, no infrastructure. Ship this first.</td></tr>
+          <tr><td><strong>Demiplane</strong></td><td>Daggerheart, Alien, Marvel, Avatar</td><td><span class="chip ok">Official API</span></td><td>The only sanctioned character API in the space, built for the Roll20 integration. Partner-gated — worth an email before you build anything.</td></tr>
+          <tr><td><strong>Pathbuilder 2e</strong></td><td>PF2e</td><td><span class="chip warn">Export code</span></td><td><code>json.php?id={6-digit}</code>, user-initiated. Probed 2026-09-13: Cloudflare bot challenge for non-browser clients, and no CORS. Needs a proxy or a file drop.</td></tr>
+          <tr><td><strong>Dicecloud v2</strong></td><td>5e</td><td><span class="chip ok">Open API</span></td><td>Open source and friendly; small user base.</td></tr>
+          <tr><td><strong>D&amp;D Beyond</strong></td><td>5e</td><td><span class="chip stop">Undocumented</span></td><td>Public sheets only, no CORS, ToS risk. The one everybody actually wants.</td></tr>
+          <tr><td><strong>Open5e / dnd5eapi</strong></td><td>5e SRD</td><td><span class="chip ok">Free, CORS</span></td><td>Reference data, not user sheets. Good fallback for spell and item text.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <h2><span class="num">04</span>Architecture</h2>
+    <p class="section-note">A hosted web app with a thin manifest, an adapter per source, and one normalized sheet schema in the middle. The normalization layer is the real product.</p>
+
+    <div class="pipeline">
+      <div class="stage">
+        <h4>Sheet source</h4>
+        <ul><li>D&amp;D Beyond JSON</li><li>Pathbuilder code</li><li>Demiplane API</li><li>File drop</li></ul>
+        <span class="hint">Each one is its own adapter; only the first is legally interesting.</span>
+      </div>
+      <div class="stage">
+        <h4>Adapter service</h4>
+        <ul><li>/import/ddb/:id</li><li>/import/pathbuilder/:code</li></ul>
+        <span class="hint">Cloudflare Worker is enough. Pass through — don't persist licensed content.</span>
+      </div>
+      <div class="stage">
+        <h4>Normalized sheet</h4>
+        <ul><li>abilities, saves, skills</li><li>AC, HP, speed</li><li>attacks, spells, inventory</li></ul>
+        <span class="hint">D&amp;D Beyond hands you raw modifier arrays, not computed values. This is the work.</span>
+      </div>
+      <div class="stage">
+        <h4>In TaleSpire</h4>
+        <ul><li>campaign localStorage</li><li>TS.dice + TS.chat</li><li>TS.sync digests</li><li>mini ↔ sheet binding</li></ul>
+        <span class="hint">Read minis, roll real dice, speak as the creature, spawn blueprints.</span>
+      </div>
+    </div>
+
+    <p><strong>Mini binding</strong> is the highest-payoff feature that costs almost nothing: keep a <code>creatureId → sheetId</code> map in campaign-scoped storage and swap the visible sheet on <code>onCreatureSelectionChange</code>. Click a mini, see its sheet.</p>
+    <p><strong>The DM party view</strong> works without any backend: each player's Symbiote emits a compact digest — name, AC, current HP, conditions — over <code>TS.sync</code>, comfortably inside the 500-character cap, and the DM instance renders the panel, gated on GM rights.</p>
+    <p><strong>Don't rebuild D&amp;D Beyond's modifier resolution from scratch.</strong> MrPrimate's <code>ddb-importer</code> has mapped that ground for years; read its license first, then its code.</p>
+  </section>
+
+  <section id="distribution">
+    <h2><span class="num">05</span>Distribution</h2>
+    <p class="section-note">The three channels you named serve different things, and the choice follows from whether you need to write back to minis.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Channel</th><th>Carries</th><th>Verdict for this project</th></tr></thead>
+        <tbody>
+          <tr><td><strong>mod.io</strong></td><td>Symbiotes, via TaleSpire's in-game mod browser</td><td><span class="chip ok">Primary</span> The route to users today. Docs note third-party repos may come later.</td></tr>
+          <tr><td><strong>Thunderstore</strong></td><td>BepInEx C# plugins, plus Symbiotes installed through LordAshes' SymbioteManagerPlugin</td><td><span class="chip warn">Mirror</span> Secondary — unless you need write-back, in which case you're shipping a plugin and this becomes primary.</td></tr>
+          <tr><td><strong>r2modman</strong></td><td>A Thunderstore client</td><td><span class="chip warn">Plugins only</span> Explicitly designed for plugins, not Symbiotes.</td></tr>
+          <tr><td><strong>Manual folder</strong></td><td><code>…/LocalLow/BouncyRock Entertainment/TaleSpire/Symbiotes/</code></td><td><span class="chip ok">Dev loop</span> TaleSpire watches the directory and hot-reloads on save.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Can a DM push the mod onto a player? No.</h3>
+    <p>Installation is entirely per-user and opt-in: a player installs from the in-game library's Community Mods tab, or drops a folder in themselves. There is <strong>no campaign-level requirement, no host push, no auto-install on join</strong>, and nothing in the API that enables a Symbiote on another client.</p>
+    <p>Two related limits shape the fallback. <code>TS.sync</code> only reaches clients running a Symbiote with the same interop ID, so players without the mod are unreachable on that channel. And <code>getClientsConnected()</code> lists clients that have it <em>loaded</em> — the docs are explicit that it excludes clients who have it installed but not open — so you can see who's actively running it, but you cannot tell "doesn't have it" from "has it closed." Don't build logic that depends on separating those.</p>
+
+    <p class="section-note" style="margin-top:26px">Design for a mixed table from day one. Three fallbacks, best first:</p>
+    <ol class="limits">
+      <li><div><b>The DM holds the sheet.</b> The DM imports a player's public link into their own instance and reads from it — zero cooperation needed from that player's client. Treat this as a first-class mode, not a degraded path, including keeping several imported sheets side by side.</div></li>
+      <li><div><b>Chat is the universal output channel.</b> <code>TS.chat.send</code> and <code>sendAsCreature</code> reach every player in the game regardless of what they have installed. A compact stat block fits inside the 400-character cap, so a modless player still receives "Tor: AC 18, HP 23/23, PP 13" or a formatted attack result. This is the most valuable thing the mod can do for people who never install it.</div></li>
+      <li><div><b>Real dice land for everyone.</b> <code>putDiceInTray</code> rolls actual TaleSpire dice through the normal game UI. A DM rolling a player's attack from an imported sheet looks identical to that player rolling it themselves.</div></li>
+    </ol>
+    <p style="margin-top:26px">The onboarding story is a mod.io link in the campaign invite, and a DM who can cover anyone who didn't click it.</p>
+  </section>
+
+  <section id="plan">
+    <h2><span class="num">06</span>Build plan</h2>
+    <p class="section-note">Phases 1–3 are a genuinely useful product on their own, and carry no legal or fragility risk. That is the argument for shipping them before touching D&amp;D Beyond at all.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th class="num">Phase</th><th>Scope</th><th class="num">Effort</th><th>Risk</th></tr></thead>
+        <tbody>
+          <tr><td class="num">0</td><td>Normalizer prototype, verified against a real character</td><td class="num">done</td><td><span class="chip ok">—</span></td></tr>
+          <tr><td class="num">1</td><td>Symbiote shell, manual JSON import, 5e sheet render, campaign storage</td><td class="num">2–3 weeks</td><td><span class="chip ok">Low</span></td></tr>
+          <tr><td class="num">2</td><td>Dice: named rolls, attack and damage in one throw, results back to chat as the creature</td><td class="num">1 week</td><td><span class="chip ok">Low</span></td></tr>
+          <tr><td class="num">2b</td><td>Advantage / disadvantage — two groups plus quiet override</td><td class="num">1 day</td><td><span class="chip ok">Low</span></td></tr>
+          <tr><td class="num">3</td><td>Mini binding, selection-driven sheet switching, <code>startPicking</code> targeting</td><td class="num">1 week</td><td><span class="chip ok">Low</span></td></tr>
+          <tr><td class="num">3b</td><td>DM-side auto hit/miss against target AC — GM clients only</td><td class="num">2–3 days</td><td><span class="chip ok">Low</span></td></tr>
+          <tr><td class="num">4</td><td>Hosted adapter and D&amp;D Beyond URL import, public sheets only</td><td class="num">3–5 days</td><td><span class="chip stop">High</span></td></tr>
+          <tr><td class="num">5</td><td>DM party view over <code>TS.sync</code></td><td class="num">1–2 weeks</td><td><span class="chip ok">Low</span></td></tr>
+          <tr><td class="num">6</td><td>Second system adapter — Pathbuilder or Demiplane</td><td class="num">1–2 weeks each</td><td><span class="chip warn">Medium</span></td></tr>
+          <tr><td class="num">7</td><td>Optional BepInEx plugin for HP/AC write-back to minis</td><td class="num">2–3 weeks + upkeep</td><td><span class="chip stop">High</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="checks">
+    <h2><span class="num">07</span>Before you write code</h2>
+    <p class="section-note">Five cheap checks. Two of them could change the shape of the whole project.</p>
+
+    <ol class="checks">
+      <li><div><b>Prove the import path end to end.</b> Set one of your own D&amp;D Beyond characters to Public, confirm the character service returns full JSON, then confirm the same call works from a hosted worker rather than your home IP.</div></li>
+      <li><div><b>Ask two or three players whether they'd flip a sheet to Public.</b> With per-player import this is a UX question rather than a blocker — but if the answer is "most won't," the browser-extension route becomes mandatory and the project gets meaningfully bigger.</div></li>
+      <li><div><b>Email Demiplane about Character API access.</b> It is the only sanctioned API in this space, and access would reorder your source priorities entirely.</div></li>
+      <li><div><b>Ask in the TaleSpire Discord</b> whether mod.io submissions accept a remote-<code>entryPoint</code> Symbiote, and whether BouncyRock has a view on sheet-import mods.</div></li>
+
+      <li><div><b>Read <code>ddb-importer</code>'s license</b> before rebuilding D&amp;D Beyond's modifier resolution from scratch.</div></li>
+    </ol>
+  </section>
+
+  <section id="sources">
+    <h2><span class="num">08</span>Sources</h2>
+    <ul class="sources">
+      <li><a href="https://symbiote-docs.talespire.com/">TaleSpire Symbiote docs</a></li>
+      <li><a href="https://symbiote-docs.talespire.com/api_doc_v0_1.md.html">Symbiote API v0.1</a></li>
+      <li><a href="https://symbiote-docs.talespire.com/manifest_doc_v1.html">Manifest v1 reference</a></li>
+      <li><a href="https://github.com/Bouncyrock/symbiotes-examples">Bouncyrock/symbiotes-examples</a></li>
+      <li><a href="https://mod.io/g/talespire">mod.io — TaleSpire</a></li>
+      <li><a href="https://thunderstore.io/c/talespire/">Thunderstore — TaleSpire</a></li>
+      <li><a href="https://github.com/LordAshes/TaleSpire-BeyondLinkPlugin">LordAshes — BeyondLink</a></li>
+      <li><a href="https://github.com/LordAshes/TaleSpire-BeyondLinkViaChrome">LordAshes — BeyondLinkViaChrome</a></li>
+      <li><a href="https://talespire.thunderstore.io/package/LordAshes/SymbioteManagerPlugin/">SymbioteManagerPlugin</a></li>
+      <li><a href="https://github.com/mrprimate/ddb-proxy">MrPrimate — ddb-proxy</a></li>
+      <li><a href="https://github.com/MrPrimate/ddb-importer">MrPrimate — ddb-importer</a></li>
+      <li><a href="https://github.com/Thahun/Talespire_Symbiote_D_D_Character">Thahun — D&amp;D Character Symbiote</a></li>
+      <li><a href="https://www.demiplane.com/blog/demiplane-x-roll20-integration">Demiplane × Roll20 / Character API</a></li>
+      <li><a href="https://pathbuilder2e.com/export.html">Pathbuilder 2e export</a></li>
+    </ul>
+  </section>
+
+  <footer>Research compiled 2026-09-13 · Endpoint behaviour verified that day and may change without notice</footer>
+
+</div>

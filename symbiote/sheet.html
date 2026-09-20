@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Spirekeeper</title>
+  <link rel="stylesheet" href="sheet.css">
+</head>
+<body>
+
+<!-- Import: shown until a sheet is loaded, and reachable again from the header. -->
+<section id="import-view" class="view">
+  <h1>Spirekeeper</h1>
+  <p class="lede">Bring a D&amp;D Beyond character into TaleSpire. <span id="app-version" class="version"></span></p>
+
+  <ol class="steps">
+    <li>
+      <span class="step-label">Paste the character link</span>
+      <div class="row">
+        <input id="ddb-link" type="text" placeholder="https://www.dndbeyond.com/characters/100000001" spellcheck="false">
+        <button id="resolve-link" class="btn">Get JSON URL</button>
+      </div>
+      <p class="hint">The character's privacy must be set to <b>Public</b> on D&amp;D Beyond.</p>
+    </li>
+
+    <li id="step-fetch" class="dimmed">
+      <span class="step-labelup">Open that URL and copy the JSON</span>
+      <div class="row">
+        <code id="json-url" class="url">—</code>
+        <button id="copy-url" class="btn" disabled>Copy</button>
+      </div>
+      <p class="hint">
+        D&amp;D Beyond sends no CORS headers, so this panel can't fetch the URL itself.
+        Open it in your browser, select all, and copy. A hosted adapter removes this step later.
+      </p>
+    </li>
+
+    <li>
+      <span class="step-label">Paste the JSON here</span>
+      <textarea id="json-input" placeholder="Paste the full character JSON, or drop a .json file anywhere on this panel" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="import-json" class="btn btn-primary">Import character</button>
+        <span id="import-status" class="status"></span>
+      </div>
+    </li>
+  </ol>
+
+  <div id="library" class="library hidden">
+    <h2>Imported characters</h2>
+    <ul id="library-list"></ul>
+    <p id="library-usage" class="hint"></p>
+  </div>
+
+  <!-- Scaffolding. Answers whether a browser extension could hand work to this
+       panel over a talespire:// URL, and how much fits in one. Remove this
+       block, lib/linkprobe.js, the `urls` subscription and the onUrlMessage
+       global once the question is settled. -->
+  <details id="link-probe" class="probe">
+    <summary>Link probe — can an outside app reach this panel?</summary>
+    <div id="probe-body"></div>
+  </details>
+</section>
+
+<!-- Sheet -->
+<section id="sheet-view" class="view hidden">
+  <header class="sheet-header">
+    <img id="avatar" class="avatar hidden" alt="">
+    <div class="who">
+      <h1 id="char-name">—</h1>
+      <p id="char-meta">—</p>
+    </div>
+    <button id="open-party" class="btn btn-ghost hidden" title="GM: party overview">Party</button>
+    <button id="open-bestiary" class="btn btn-ghost hidden" title="GM: monsters">Monsters</button>
+    <button id="open-encounters" class="btn btn-ghost hidden" title="GM: encounters and initiative">Fights</button>
+    <button id="open-library" class="btn btn-ghost" title="Switch or import a character">☰</button>
+  </header>
+
+  <div id="bind-bar" class="bind-bar">
+    <span id="bind-status">No mini linked</span>
+    <button id="bind-btn" class="btn btn-small">Link selected mini</button>
+  </div>
+
+  <div class="vitals">
+    <div class="vital"><span class="vital-label">AC</span><span id="v-ac" class="vital-value">—</span></div>
+    <div class="vital"><span class="vital-label">HP</span><span id="v-hp" class="vital-value">—</span></div>
+    <div class="vital"><span class="vital-label">Init</span><span id="v-init" class="vital-value">—</span></div>
+    <div class="vital"><span class="vital-label">Speed</span><span id="v-speed" class="vital-value">—</span></div>
+    <div class="vital"><span class="vital-label">Pass. Per</span><span id="v-pp" class="vital-value">—</span></div>
+    <div class="vital"><span class="vital-label">Prof</span><span id="v-prof" class="vital-value">—</span></div>
+  </div>
+
+  <div class="hp-bar">
+    <input id="hp-amount" type="number" min="0" value="1" aria-label="Amount of damage or healing">
+    <button id="hp-damage" class="btn btn-small">Damage</button>
+    <button id="hp-heal" class="btn btn-small">Heal</button>
+    <input id="hp-temp-amount" type="number" min="0" value="0" aria-label="Temporary hit points to grant">
+    <button id="hp-temp-add" class="btn btn-small">Temp HP</button>
+  </div>
+
+  <div class="hp-bar">
+    <button id="rest-short" class="btn btn-small btn-ghost">Short rest</button>
+    <button id="rest-long" class="btn btn-small btn-ghost">Long rest</button>
+  </div>
+
+  <div id="hit-dice" class="hit-dice"></div>
+
+  <!-- Targeting is global state, so the control lives above the tabs: a target
+       picked here applies to a spell attack just as much as a weapon swing. -->
+  <div class="target-bar">
+    <button id="pick-target" class="btn btn-small">Pick target</button>
+    <span id="target-status" class="status">No target</span>
+    <button id="clear-target" class="btn btn-small btn-ghost hidden">Clear</button>
+  </div>
+
+  <div class="init-bar">
+    <button id="roll-initiative" class="btn btn-small btn-primary">Roll initiative</button>
+    <span id="init-queue" class="status">Not in initiative</span>
+  </div>
+
+  <div class="conditions-block">
+    <div id="conditions" class="conditions"></div>
+    <div class="condition-add">
+      <select id="condition-pick" aria-label="Add a condition"></select>
+      <button id="condition-add" class="btn btn-small">Add</button>
+    </div>
+    <p id="condition-preview" class="hint"></p>
+    <ul id="condition-effects" class="condition-effects"></ul>
+  </div>
+
+  <!-- Roll mode applies to the next roll. Shift/Ctrl-click a roll button is the shortcut. -->
+  <div class="mode-bar" role="radiogroup" aria-label="Roll mode">
+    <button class="mode-btn is-active" data-mode="normal" role="radio" aria-checked="true">Normal</button>
+    <button class="mode-btn" data-mode="advantage" role="radio" aria-checked="false">Advantage</button>
+    <button class="mode-btn" data-mode="disadvantage" role="radio" aria-checked="false">Disadvantage</button>
+  </div>
+  <p class="hint mode-hint">Pick a mode above; it stays until you change it. Shift-click and Ctrl-click also work where the host passes modifier keys through.</p>
+  <div id="staged-roll" class="staged-roll hidden"></div>
+  <div id="pending-damage" class="pending hidden"></div>
+  <div id="effect-inbox" class="inbox"></div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-tab="actions" role="tab" aria-selected="true">Actions</button>
+    <button class="tab" data-tab="spells" role="tab" aria-selected="false">Spells</button>
+    <button class="tab" data-tab="checks" role="tab" aria-selected="false">Checks</button>
+    <button class="tab" data-tab="gear" role="tab" aria-selected="false">Gear</button>
+    <button class="tab" data-tab="info" role="tab" aria-selected="false">Info</button>
+  </nav>
+
+  <div id="tab-actions" class="tab-panel" role="tabpanel">
+
+    <div id="concentration" class="concentration hidden">
+      <span id="conc-label"></span>
+      <button id="conc-drop" class="btn btn-small btn-ghost">Drop</button>
+    </div>
+
+    <section class="effects">
+      <div class="effects-head">
+        <h2>Active effects</h2>
+        <button id="effect-custom-toggle" class="btn btn-small btn-ghost">Custom…</button>
+      </div>
+      <div id="effect-presets" class="effect-presets"></div>
+      <form id="effect-custom" class="effect-custom hidden">
+        <input id="effect-name" type="text" placeholder="Name, e.g. Bardic Inspiration" spellcheck="false">
+        <input id="effect-bonus" type="text" placeholder="+2 or 1d4" spellcheck="false">
+        <div class="effect-targets">
+          <label><input type="checkbox" value="attack"> Attack</label>
+          <label><input type="checkbox" value="save"> Saves</label>
+          <label><input type="checkbox" value="check"> Checks</label>
+          <label><input type="checkbox" value="damage"> Damage</label>
+          <label><input type="checkbox" value="ac"> AC</label>
+          <label><input id="effect-once" type="checkbox"> Once only</label>
+        </div>
+        <button type="submit" class="btn btn-small btn-primary">Add effect</button>
+      </form>
+      <div id="weapon-pick-panel" class="grant-panel hidden">
+        <h2 id="weapon-pick-title">Apply to which weapon?</h2>
+        <div id="weapon-pick-list" class="grant-recipients"></div>
+        <div class="row">
+          <button id="weapon-pick-cancel" class="btn btn-small btn-ghost">Cancel</button>
+        </div>
+      </div>
+
+      <div id="effect-list" class="effect-list"></div>
+
+      <!-- Inline rather than a <dialog>: a modal is awkward in a 400px sidebar,
+           and this avoids depending on dialog close-event behaviour we can't
+           verify inside TaleSpire's embedded Chromium. -->
+      <div id="grant-panel" class="grant-panel hidden">
+        <h2 id="grant-title">Grant effect</h2>
+        <p class="hint">Anyone whose panel is closed, or who doesn't have the mod, gets a chat message instead.</p>
+        <div id="grant-recipients" class="grant-recipients"></div>
+        <div class="row">
+          <button id="grant-confirm" class="btn btn-small btn-primary">Grant</button>
+          <button id="grant-cancel" class="btn btn-small btn-ghost">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="attacks"></div>
+    <div id="resources"></div>
+  </div>
+
+  <div id="tab-spells" class="tab-panel hidden" role="tabpanel">
+    <div id="slots" class="slots"></div>
+    <p id="slots-note" class="hint"></p>
+    <div id="spells"></div>
+  </div>
+
+  <div id="tab-checks" class="tab-panel hidden" role="tabpanel">
+    <h2>Saving throws</h2>
+    <div id="saves" class="grid-rolls"></div>
+    <p id="saves-note" class="hint"></p>
+    <h2>Abilities</h2>
+    <div id="abilities" class="grid-rolls"></div>
+    <h2>Skills</h2>
+    <div id="skills" class="grid-rolls"></div>
+  </div>
+
+  <div id="tab-gear" class="tab-panel hidden" role="tabpanel">
+    <p id="gear-note" class="hint"></p>
+    <div id="gear-worn"></div>
+    <h2>Carried</h2>
+    <div id="gear-carried"></div>
+  </div>
+
+  <div id="tab-info" class="tab-panel hidden" role="tabpanel">
+    <div id="senses" class="info-block"></div>
+    <h2>Features</h2>
+    <ul id="features" class="plain-list"></ul>
+    <div id="meta-block" class="info-block"></div>
+  </div>
+</section>
+
+<!-- GM: a live read-only view of the party. Only a GM's client is given the
+     stats behind it, so the button that opens this is hidden for players. -->
+<section id="party-view" class="view hidden">
+  <header class="sheet-header">
+    <div class="who">
+      <h1>Party</h1>
+      <p id="party-meta">—</p>
+    </div>
+    <button id="party-refresh" class="btn btn-ghost" title="Re-read the board">↻</button>
+    <button id="close-party" class="btn btn-ghost" title="Back to the sheet">✕</button>
+  </header>
+  <div id="party-list" class="party-list"></div>
+</section>
+
+<!-- GM: monsters. The SRD set ships with the mod; Open5e is opt-in because it
+     is the only request this panel makes off your machine. -->
+<section id="bestiary-view" class="view hidden">
+  <header class="sheet-header">
+    <div class="who">
+      <h1>Monsters</h1>
+      <p id="bestiary-speaker">Rolls post from you</p>
+    </div>
+    <button id="bestiary-speak" class="btn btn-ghost" title="Post rolls as a mini on the board">Speak as…</button>
+    <button id="close-bestiary" class="btn btn-ghost" title="Back">✕</button>
+  </header>
+
+  <div class="row bestiary-search">
+    <input id="bestiary-query" type="text" placeholder="Search monsters" spellcheck="false">
+    <label class="inline-check" title="Search Open5e's full catalogue. This sends the search term off your machine.">
+      <input id="bestiary-online" type="checkbox"> Open5e
+    </label>
+  </div>
+
+  <div id="bestiary-results" class="bestiary-results"></div>
+  <div id="bestiary-add" class="row bestiary-add hidden">
+    <select id="bestiary-encounter" aria-label="Encounter to add to"></select>
+    <input id="bestiary-count" type="number" min="1" max="20" value="1" aria-label="How many">
+    <button id="bestiary-add-btn" class="btn btn-small">Add to encounter</button>
+  </div>
+  <div id="bestiary-sheet" class="bestiary-sheet"></div>
+</section>
+
+<!-- GM: encounters. Prepared fights, the minis standing in for them, and
+     TaleSpire's turn order alongside. -->
+<section id="encounters-view" class="view hidden">
+  <header class="sheet-header">
+    <div class="who">
+      <h1>Fights</h1>
+      <p id="encounters-meta">—</p>
+    </div>
+    <button id="close-encounters" class="btn btn-ghost" title="Back">✕</button>
+  </header>
+
+  <div class="row">
+    <input id="encounter-name" type="text" placeholder="New encounter name" spellcheck="false">
+    <button id="encounter-new" class="btn btn-small">Create</button>
+  </div>
+
+  <div id="encounters-list" class="encounters-list"></div>
+
+  <div id="encounter-detail" class="encounter-detail"></div>
+</section>
+
+<div id="toast" class="toast hidden"></div>
+<div id="drop-overlay" class="drop-overlay hidden">Drop a character JSON file</div>
+
+<script src="lib/ddb.js"></script>
+<script src="lib/board.js"></script>
+<script src="lib/store.js"></script>
+<script src="lib/rolls.js"></script>
+<script src="lib/party.js"></script>
+<script src="lib/gm.js"></script>
+<script src="lib/spells.js"></script>
+<script src="lib/linkprobe.js"></script>
+<script src="lib/monsters.js"></script>
+<script src="lib/bestiary.js"></script>
+<script src="lib/encounters.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

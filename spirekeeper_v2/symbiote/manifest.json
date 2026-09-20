@@ -1,0 +1,59 @@
+{
+  "manifestVersion": 1,
+  "name": "Spirekeeper v2",
+  "version": "2.0.0-dev",
+  "summary": "Work in progress. The shipping mod is Spirekeeper \u2014 install both and use that one to play.",
+  "license": "MIT",
+  "entryPoint": "/sheet.html",
+  "descriptionFilePath": "/readme.md",
+  "about": {
+    "authors": [
+      "Ryan Johnson"
+    ]
+  },
+  "api": {
+    "version": "0.1",
+    "initTimeout": 10,
+    "interop": {
+      "id": "2f7d6457-3438-489a-a959-6283a8f40dd5"
+    },
+    "subscriptions": {
+      "symbiote": {
+        "onStateChangeEvent": "onStateChangeEvent"
+      },
+      "creatures": {
+        "onCreatureSelectionChange": "onCreatureSelectionChange",
+        "onCreatureStateChange": "onCreatureStateChange"
+      },
+      "dice": {
+        "onRollResults": "onRollResults"
+      },
+      "picking": {
+        "onPickingEvent": "onPickingEvent"
+      },
+      "sync": {
+        "onSyncMessage": "onSyncMessage"
+      },
+      "initiative": {
+        "onInitiativeEvent": "onInitiativeEvent"
+      },
+      "urls": {
+        "onUrlMessage": "onUrlMessage"
+      }
+    }
+  },
+  "environment": {
+    "webViewBackgroundColor": "#1b1d22",
+    "capabilities": [
+      "runInBackground"
+    ],
+    "extras": [
+      "fonts",
+      "icons",
+      "colorStyles"
+    ]
+  },
+  "controls": {
+    "reload": true
+  }
+}
