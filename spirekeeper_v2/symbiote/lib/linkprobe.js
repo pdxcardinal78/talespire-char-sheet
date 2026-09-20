@@ -434,7 +434,7 @@ const LinkProbe = (() => {
     render();
   }
 
-  return { configure, received, readPrefix, runLadder, copyExternal, render, state };
+  return { configure, received, note, readPrefix, runLadder, copyExternal, render, state };
 })();
 
 if (typeof window !== "undefined") window.LinkProbe = LinkProbe;

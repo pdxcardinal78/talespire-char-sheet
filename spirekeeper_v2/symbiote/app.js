@@ -12,6 +12,9 @@ const App = (() => {
   const $ = (id) => document.getElementById(id);
   const failed = (r) => r && r.cause !== undefined;
 
+  // Rolls that arrived before the panel was ready to throw them.
+  const pendingLinkedRolls = [];
+
   const state = {
     ready: false,
     sheet: null,
@@ -40,6 +43,9 @@ const App = (() => {
 
   async function boot() {
     state.ready = true;
+
+    // Anything that arrived while we were starting.
+    while (pendingLinkedRolls.length) onLinkedRoll(pendingLinkedRolls.shift());
     try {
       await Store.load();
       renderVersion();
@@ -2569,6 +2575,15 @@ const App = (() => {
     const name = msg.n || "Roll";
     const isDamage = msg.d === 1;
 
+    // A URL message can start the panel rather than arrive at a running one, in
+    // which case it lands mid-boot and doRoll would bounce it with a toast
+    // nobody is looking at. Hold it and throw it once we're up.
+    if (!state.ready) {
+      pendingLinkedRolls.push(msg);
+      LinkProbe.note("note", `held ${name} until the panel finished starting`);
+      return;
+    }
+
     toast(`${name} from D&D Beyond`);
 
     // stage() names the damage group itself, so the bare name goes in here —
@@ -3052,14 +3067,20 @@ function onUrlMessage(event) {
   console.log("[Spirekeeper] url message", event);
 
   const msg = decodeLinkMessage(linkPayloadOf(event));
-  if (msg?.t === "roll") {
-    App.onLinkedRoll(msg);
-    return;
-  }
 
-  // Anything we don't recognise still goes to the probe, which is what makes a
-  // malformed message diagnosable rather than silently ignored.
-  LinkProbe.received(event);
+  // Everything is recorded, including messages we understood. Routing recognised
+  // rolls straight to the panel left a successful delivery with no trace, so the
+  // probe log read exactly the same whether the message arrived or never did —
+  // which is the one question the log exists to answer. TaleSpire shows no
+  // console, so this is the only evidence there is.
+  LinkProbe.note(
+    msg?.t === "roll" ? "ok" : "in",
+    msg?.t === "roll" ? `roll received: ${msg.n} ${msg.r}` : "message received, not a roll",
+    msg ? null : String(linkPayloadOf(event)).slice(0, 80)
+  );
+
+  if (msg?.t === "roll") App.onLinkedRoll(msg);
+  else LinkProbe.received(event);
 }
 
 function onSyncMessage(event) {
