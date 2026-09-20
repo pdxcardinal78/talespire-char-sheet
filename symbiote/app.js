@@ -113,7 +113,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.10.6";
+  const APP_VERSION = "0.10.7";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -2827,8 +2827,6 @@ const App = (() => {
       // Online search hits a server, so it waits longer than a local filter.
       searchTimer = setTimeout(() => Bestiary.runSearch(ev.target.value), $("bestiary-online").checked ? 400 : 120);
     };
-    LinkProbe.configure({ host: $("probe-body") });
-
     Encounters.configure({
       list: $("encounters-list"),
       detail: $("encounter-detail"),
@@ -2974,19 +2972,6 @@ function onInitiativeEvent(event) {
     App.onInitiativeUpdated(event.payload?.queue);
     Encounters.setQueue(event.payload?.queue);
   }
-}
-
-/**
- * Inbound `talespire://symbiote/<interopId>/<payload>` URL.
- *
- * Scaffolding for the link probe — see lib/linkprobe.js. If this proves out, it
- * becomes the door a browser extension knocks on.
- */
-function onUrlMessage(event) {
-  // The whole event goes to the probe, which digs the payload out itself —
-  // picking the field here is what produced a run of "0 chars" arrivals.
-  console.log("[Spirekeeper] url message", event);
-  LinkProbe.received(event);
 }
 
 function onSyncMessage(event) {
@@ -3195,26 +3180,6 @@ document.addEventListener("DOMContentLoaded", () => {
         getClientsConnected: async () => [{ id: "dev-client", player: { id: "dev-other", name: "Kree (dev)" } }],
       },
       system: { clipboard: { setText: log("clipboard.setText") } },
-      // The probe's whole job is detecting a silent length ceiling, so the stub
-      // has one: over the limit, submit() resolves fine and the message simply
-      // never arrives — which is how an over-long URL is reported to behave, and
-      // the case the probe has to catch correctly before it can be believed.
-      urls: {
-        createUrlPrefixForThisSymbiote: async () =>
-          `talespire://symbiote/6f1c9d84-2a77-4f3e-9b25-0d8a4c1e77b2/`,
-        submit: async (url) => {
-          const limit = window.devUrlLimit ?? 2048;
-          console.log(`[dev] urls.submit ${url.length} chars (limit ${limit})`);
-          // The game answers an over-long URL with `urlRejected` rather than
-          // dropping it, so the stub does too.
-          if (url.length > limit) return { cause: "urlRejected" };
-          // The game hands over the raw URL segment, still percent-encoded —
-          // reproduced here so a parser that forgets to decode fails in dev too.
-          const payload = url.split("/").pop();
-          setTimeout(() => onUrlMessage({ kind: "urlMessage", payload }), 120);
-          return {};
-        },
-      },
     };
     App.boot();
   }

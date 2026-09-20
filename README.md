@@ -584,9 +584,9 @@ are stored by slug and re-read from the shipped file.
 
 ## Link probe: could a browser extension drive this?
 
-Scaffolding, not a feature. `symbiote/lib/linkprobe.js` plus the `urls`
-subscription and the `onUrlMessage` global exist to settle one question before
-any extension work starts.
+Scaffolding that has been removed from the shipping mod now that it answered
+its question. It survives in `spirekeeper_v2/symbiote/lib/linkprobe.js`, where
+the rolling work needs the same `onUrlMessage` door it was built to test.
 
 TaleSpire registers a `talespire://` protocol handler. Two verbs matter:
 
@@ -660,8 +660,8 @@ What the numbers decide:
 Rolling is viable at almost any ceiling. Carrying a whole character is the part
 that depends on the answer — and the reason to measure before building.
 
-Delete the file, its script tag, the subscription and the global when the
-question is settled.
+Removed from `symbiote/` in 0.10.7 — the file, its script tag, the `urls`
+subscription, the `onUrlMessage` global, the dev stub and the styles.
 
 ## What a file origin forbids
 
