@@ -83,8 +83,16 @@ hand-off. Meanwhile `TS.urls.submit()` from inside the panel arrives in 6–9 ms
 which proves the subscription, the handler and the decoder are all fine.
 
 "TaleSpire already running" is the only state that matters during a session, so
-rolling over a Symbiote URL cannot work. The code below is complete and
+rolling over a **Symbiote** URL cannot work. The code below is complete and
 correct as far as it can be tested; what it depends on is not available.
+
+**But the `dice` verb does work while running.** Pasted by hand with TaleSpire
+open, `talespire://dice/PasteTest:1d20+7` puts dice in the tray. It takes named,
+slash-separated groups, and the panel already watches every roll on the board
+via `onRollResults` — so sending well-named dice and having the panel recognise
+them on arrival recovers advantage, chat attribution, hit/miss and the GM's
+damage inbox. It cannot recover active effects: the extension has no way to know
+Bless is running, and once the dice have landed it is too late to add one.
 
 Everything still works up to that last hop, and it is all verified:
 

@@ -650,13 +650,28 @@ The in-game path proves the panel, its `urls` subscription and its handler are
 all fine, and the probe log records every arrival, so an arriving message could
 not have been missed.
 
-That kills rolling from a browser extension, because "TaleSpire already
-running" is the only state that matters during a session. It says nothing
-about the importer, which goes via the clipboard and is unaffected.
+**It is the `symbiote` verb specifically, not external URLs in general.**
+Pasted by hand with TaleSpire running: `talespire://symbiote/<id>/…` produces
+nothing, while `talespire://dice/PasteTest:1d20+7` puts dice in the tray. So
+the game accepts external URLs mid-session and declines to route them to a
+Symbiote.
 
-Worth re-testing after a TaleSpire update: it may be a bug rather than a
-policy, and `talespire://dice/` may behave differently from
-`talespire://symbiote/` here.
+That leaves a way round, because the `dice` verb takes named, slash-separated
+groups (`talespire://dice/Shillelagh:1d20+5/Bless:1d4`) and **the panel already
+sees every roll on the board** through `onRollResults` — the same path the GM's
+damage inbox uses for other players' rolls. An extension can put correctly
+named dice in the tray, and the panel can recognise them as they land and do
+the rest.
+
+What that route cannot carry is anything only the panel knows. Active effects
+are the real loss: the extension has no way to learn that Bless is running, and
+by the time the panel sees the dice it is too late to add a die. Advantage
+survives, because the extension can send two identically named groups and let
+the panel pick; so do chat attribution, hit/miss against a target, and the GM's
+damage inbox, all of which are decided after the dice land.
+
+Worth re-testing the Symbiote verb after a TaleSpire update — it may be a bug
+rather than a policy.
 
 Design consequences:
 
