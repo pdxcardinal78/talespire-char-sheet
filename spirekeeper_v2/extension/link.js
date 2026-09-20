@@ -21,9 +21,11 @@ const Link = (() => {
   const INTEROP_ID = "2f7d6457-3438-489a-a959-6283a8f40dd5";
   const PREFIX = `talespire://symbiote/${INTEROP_ID}/`;
 
-  // Measured, not assumed. Kept a little under the real ceiling so a long
-  // weapon name can never push a message over it.
-  const MAX_PAYLOAD = 1900;
+  // Measured, not assumed — and the measurement moves. The ladder has reported
+  // a 2048-character URL ceiling on one run and ~1536 on another, so this sits
+  // well under the lower figure rather than close to the higher one. Rolls are
+  // ~90 characters, so there is no cost to being conservative here.
+  const MAX_PAYLOAD = 1200;
 
   /**
    * base64url, not base64.
