@@ -104,9 +104,9 @@ using the link probe in `spirekeeper_v2/symbiote`.
 
 ## Next
 
-After rolling: Beyond the Spire already does it well, and it is
-the half that breaks whenever D&D Beyond restyles its sheet. When it happens it
-should go over a Symbiote URL rather than `talespire://dice/`, so rolls arrive
-as Spirekeeper's own code and keep advantage, chat attribution and the GM's
-damage inbox working. See the main README's link-probe section for the measured
-limits — 1984 characters per message, base64url only.
+Nothing outstanding. The extension does one job and does it: it reads a
+character with the user's own session and hands it over in a single paste.
+
+If it grows, the obvious candidates are noticing when the open character is
+already imported and offering to update it, and packaging for the Chrome and
+Firefox stores so it installs without developer mode.
