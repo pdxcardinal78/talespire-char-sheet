@@ -28,6 +28,14 @@ lists them separately and they cannot receive each other's messages:
 ./dev/install.sh --src spirekeeper_v2/symbiote --name "Spirekeeper v2"
 ```
 
+**Both must be installed for the extension to work.** Rolls are addressed to v2
+by interop id, so with only v1 installed the browser launches the URL happily
+and nothing receives it — Chrome logs success, the panel logs nothing, and
+there is no error to follow. `dev/preflight.mjs spirekeeper_v2/symbiote` now
+checks that the id in `extension/link.js` still matches this manifest, which
+catches the same failure when the two drift rather than when someone notices
+their dice stopped arriving.
+
 Stored data lives inside each Symbiote's own folder, so characters and
 encounters don't cross between them. Browser-storage keys are namespaced
 (`spirekeeper2:…`) for the same reason — both builds run from a file origin in
