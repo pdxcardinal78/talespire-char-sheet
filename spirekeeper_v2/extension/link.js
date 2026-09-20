@@ -64,21 +64,54 @@ const Link = (() => {
   /**
    * Hand a URL to the operating system without leaving the page.
    *
-   * Setting `location.href` would navigate D&D Beyond away mid-roll, and
-   * `window.open` is treated as a popup and blocked. A throwaway hidden iframe
-   * triggers the protocol handler and leaves the sheet where it is.
+   * A custom scheme does not navigate the page: the browser hands it to the
+   * registered handler and the document stays put. What varies is *which* way
+   * of asking Chrome will honour, and the rules differ by version and by
+   * whether user activation is still in scope — so this tries the reliable one
+   * first and falls back rather than betting everything on one mechanism.
+   *
+   * Order matters. A synthesised click on a real anchor is the same path as a
+   * person clicking a link, which is the case browsers are least likely to
+   * block; external-protocol launches from a subframe are the case they are
+   * most likely to block, so the iframe is the fallback, not the default.
+   *
+   * Must be called synchronously from the click handler. Anything awaited
+   * first spends the user activation and the launch is refused.
    */
   function open(url) {
-    const frame = document.createElement("iframe");
-    frame.style.display = "none";
-    frame.src = url;
-    document.body.appendChild(frame);
-    // Long enough for the handler to fire, short enough to leave no litter.
-    setTimeout(() => frame.remove(), 1000);
+    const attempts = [];
+
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      attempts.push("anchor");
+    } catch (e) {
+      attempts.push(`anchor failed: ${e.message}`);
+    }
+
+    try {
+      const frame = document.createElement("iframe");
+      frame.style.display = "none";
+      frame.src = url;
+      document.body.appendChild(frame);
+      setTimeout(() => frame.remove(), 1000);
+      attempts.push("iframe");
+    } catch (e) {
+      attempts.push(`iframe failed: ${e.message}`);
+    }
+
+    console.log("[Spirekeeper] sent", url.length, "chars via", attempts.join(" + "));
+    return attempts;
   }
 
   function sendRoll(roll) {
-    open(urlFor(rollMessage(roll)));
+    const url = urlFor(rollMessage(roll));
+    console.log("[Spirekeeper] roll ->", roll, url);
+    return open(url);
   }
 
   return { INTEROP_ID, PREFIX, MAX_PAYLOAD, encode, rollMessage, urlFor, open, sendRoll };

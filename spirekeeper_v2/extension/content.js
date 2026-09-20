@@ -59,7 +59,9 @@
     const roll = SpirekeeperRolls.describe(button);
     if (!roll) {
       // Not something we understand. Leaving it to D&D Beyond is the honest
-      // outcome — better their dice than a roll we guessed at.
+      // outcome — better their dice than a roll we guessed at — but say so,
+      // because "nothing happened" is indistinguishable from a broken hook.
+      console.log("[Spirekeeper] clicked a rollable this build doesn't recognise", button);
       return;
     }
 
@@ -84,7 +86,10 @@
     document.documentElement.classList.toggle("spirekeeper-active", state.on);
   }
 
-  chrome.storage?.local?.get(SETTING, (got) => apply(got?.[SETTING]));
+  chrome.storage?.local?.get(SETTING, (got) => {
+    apply(got?.[SETTING]);
+    console.log(`[Spirekeeper] interception ${state.on ? "ON" : "OFF"}`);
+  });
 
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area === "local" && SETTING in changes) {
@@ -93,7 +98,12 @@
     }
   });
 
-  // A marker the popup can check, so it can tell "switched off" from "this page
-  // has no content script" — a distinction that otherwise costs a support round.
-  window.__spirekeeperContent = true;
+  // One line on load, so "is the content script even running?" is answerable
+  // from the page's own devtools console. An earlier attempt set a flag on
+  // `window` for the popup to read, which cannot work: a content script's
+  // `window` belongs to its isolated world and nothing outside can see it.
+  console.log(
+    `[Spirekeeper] content script ready — ${SpirekeeperRolls.all().length} rollable buttons found, ` +
+      `interception ${state.on ? "ON" : "OFF"}`
+  );
 })();
