@@ -56,43 +56,9 @@
     $("hint").textContent = "Now paste it into Spirekeeper's import box.";
   }
 
-  const SETTING = "interceptRolls";
-
-  /**
-   * The roll toggle.
-   *
-   * Stored rather than held in the popup, because the popup is destroyed every
-   * time it closes and the content script needs the answer long after that.
-   */
-  async function wireToggle(onCharacterPage) {
-    const box = $("intercept");
-    const hint = $("intercept-hint");
-
-    const got = await chrome.storage.local.get(SETTING);
-    box.checked = Boolean(got?.[SETTING]);
-
-    box.onchange = async () => {
-      await chrome.storage.local.set({ [SETTING]: box.checked });
-      hint.textContent = box.checked
-        ? "Clicking a roll on this sheet throws it in TaleSpire."
-        : "Rolls stay on D&D Beyond.";
-    };
-
-    if (!onCharacterPage) {
-      hint.textContent = "Open a character sheet for this to do anything.";
-    }
-    // Default off, and it stays off unless someone deliberately turns it on:
-    // the feature is complete but its delivery path is unavailable.
-
-  }
-
   async function boot() {
     try {
       const url = await activeTabUrl();
-      // The toggle is wired either way — it is a standing preference, not
-      // something that only applies to the page currently open.
-      await wireToggle(Boolean(DDB.idFromUrl(url)));
-
       if (!DDB.idFromUrl(url)) {
         status("Open a D&D Beyond character page, then click here again.");
         return;

@@ -12,9 +12,6 @@ const App = (() => {
   const $ = (id) => document.getElementById(id);
   const failed = (r) => r && r.cause !== undefined;
 
-  // Rolls that arrived before the panel was ready to throw them.
-  const pendingLinkedRolls = [];
-
   const state = {
     ready: false,
     sheet: null,
@@ -43,9 +40,6 @@ const App = (() => {
 
   async function boot() {
     state.ready = true;
-
-    // Anything that arrived while we were starting.
-    while (pendingLinkedRolls.length) onLinkedRoll(pendingLinkedRolls.shift());
     try {
       await Store.load();
       renderVersion();
@@ -2562,39 +2556,6 @@ const App = (() => {
     }
   }
 
-  /**
-   * A roll sent from the D&D Beyond extension.
-   *
-   * It arrives as our own code rather than as bare dice, which is the whole
-   * reason for going through a Symbiote URL instead of `talespire://dice/`:
-   * everything the panel already does still applies — the roll mode, active
-   * effects like Bless, chat attribution to the linked mini, and the GM's
-   * damage inbox.
-   */
-  async function onLinkedRoll(msg) {
-    const name = msg.n || "Roll";
-    const isDamage = msg.d === 1;
-
-    // A URL message can start the panel rather than arrive at a running one, in
-    // which case it lands mid-boot and doRoll would bounce it with a toast
-    // nobody is looking at. Hold it and throw it once we're up.
-    if (!state.ready) {
-      pendingLinkedRolls.push(msg);
-      LinkProbe.note("note", `held ${name} until the panel finished starting`);
-      return;
-    }
-
-    toast(`${name} from D&D Beyond`);
-
-    // stage() names the damage group itself, so the bare name goes in here —
-    // passing "X damage" produced "X damage damage" in the tray.
-    await doRoll(
-      isDamage
-        ? { name, damage: msg.r, kind: "damage" }
-        : { name, roll: msg.r, kind: msg.k || "check" }
-    );
-  }
-
   async function announce(text) {
     await Rolls.post(text, state.creatureId);
   }
@@ -2972,7 +2933,7 @@ const App = (() => {
     });
   }
 
-  return { boot, wire, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onLinkedRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, state };
+  return { boot, wire, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, state };
 })();
 
 // ---------------------------------------------------------------------------
@@ -3024,63 +2985,16 @@ function onInitiativeEvent(event) {
  * becomes the door a browser extension knocks on.
  */
 /**
- * base64url back to an object, or null if this isn't one of ours.
+ * Inbound `talespire://symbiote/<interopId>/<payload>` URL.
  *
- * TaleSpire hands over the raw URL segment still percent-encoded, which is the
- * mistake the link probe made twice — decode before anything else touches it.
+ * Kept for the link probe, which is the tool that would notice if TaleSpire
+ * ever starts routing these while the game is running. It does not today: the
+ * `dice` verb arrives mid-session and this one does not, which is why rolling
+ * from a browser was dropped. See the extension's README.
  */
-function decodeLinkMessage(text) {
-  let raw = String(text || "");
-  if (raw.includes("%")) {
-    try {
-      raw = decodeURIComponent(raw);
-    } catch {
-      return null;
-    }
-  }
-  try {
-    const b64 = raw.replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(escape(atob(b64)));
-    const msg = JSON.parse(json);
-    return msg && msg.t ? msg : null;
-  } catch {
-    return null; // not base64, not JSON — the probe can still log it
-  }
-}
-
-/** Pull the payload out of whatever shape the event has. */
-function linkPayloadOf(event) {
-  const strings = [];
-  (function walk(node, depth) {
-    if (node == null || depth > 4) return;
-    if (typeof node === "string") return void strings.push(node);
-    if (typeof node !== "object") return;
-    for (const [k, v] of Object.entries(node)) {
-      if (k === "kind") continue;
-      walk(v, depth + 1);
-    }
-  })(event, 0);
-  return strings.sort((a, b) => b.length - a.length)[0] || "";
-}
-
 function onUrlMessage(event) {
   console.log("[Spirekeeper] url message", event);
-
-  const msg = decodeLinkMessage(linkPayloadOf(event));
-
-  // Everything is recorded, including messages we understood. Routing recognised
-  // rolls straight to the panel left a successful delivery with no trace, so the
-  // probe log read exactly the same whether the message arrived or never did —
-  // which is the one question the log exists to answer. TaleSpire shows no
-  // console, so this is the only evidence there is.
-  LinkProbe.note(
-    msg?.t === "roll" ? "ok" : "in",
-    msg?.t === "roll" ? `roll received: ${msg.n} ${msg.r}` : "message received, not a roll",
-    msg ? null : String(linkPayloadOf(event)).slice(0, 80)
-  );
-
-  if (msg?.t === "roll") App.onLinkedRoll(msg);
-  else LinkProbe.received(event);
+  LinkProbe.received(event);
 }
 
 function onSyncMessage(event) {

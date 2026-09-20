@@ -70,114 +70,37 @@ token path. The popup reports "Read using your signed-in session" for **both
 public and private** characters, and a private character imports — so the
 "set privacy to Public" requirement is gone.
 
-## Rolling — blocked, and not by this code
+## Rolling: tried, and dropped
 
-**Do not spend more time here without re-testing the finding below.**
+Not a limitation of the code — the code worked. It was dropped because the only
+route that survives contact with TaleSpire is worse than the panel that already
+exists.
 
-A Symbiote URL only reaches the panel when TaleSpire is *not already running*.
-Verified by hand, with no extension involved: the same URL pasted into a
-browser address bar arrives when TaleSpire is closed (~7 s, cold launch) and
-never arrives when it is open. Chrome reports `Launched external handler` in
-both cases, so the browser does its part and the message is lost after the
-hand-off. Meanwhile `TS.urls.submit()` from inside the panel arrives in 6–9 ms,
-which proves the subscription, the handler and the decoder are all fine.
+**The finding.** A `talespire://symbiote/<id>/…` URL reaches the panel only when
+TaleSpire is *not already running*. Verified by hand, no extension involved: the
+same URL pasted into a browser address bar arrives when TaleSpire is closed
+(~7 s, cold launch) and never arrives when it is open. Chrome reports `Launched
+external handler` either way, so the browser does its part. Meanwhile
+`TS.urls.submit()` from inside the panel arrives in 6–9 ms, proving the
+subscription, handler and decoder were all fine.
 
-"TaleSpire already running" is the only state that matters during a session, so
-rolling over a **Symbiote** URL cannot work. The code below is complete and
-correct as far as it can be tested; what it depends on is not available.
+It is that verb specifically: `talespire://dice/PasteTest:1d20+7` **does** put
+dice in the tray mid-session. So a route existed — send named dice groups and
+let the panel recognise them on arrival through `onRollResults`, the same path
+the GM's damage inbox already uses. Advantage would survive, as would chat
+attribution, hit/miss and the damage inbox.
 
-**But the `dice` verb does work while running.** Pasted by hand with TaleSpire
-open, `talespire://dice/PasteTest:1d20+7` puts dice in the tray. It takes named,
-slash-separated groups, and the panel already watches every roll on the board
-via `onRollResults` — so sending well-named dice and having the panel recognise
-them on arrival recovers advantage, chat attribution, hit/miss and the GM's
-damage inbox. It cannot recover active effects: the extension has no way to know
-Bless is running, and once the dice have landed it is too late to add one.
+**Why it was dropped anyway.** Active effects cannot survive that route. The
+extension has no way to learn that Bless is running, and once dice are in the
+tray it is too late to add one. A roll that silently omits a buff is worse than
+one made somewhere else — and "somewhere else" is a panel on the same screen
+that handles advantage, effects, targeting and the GM inbox properly.
 
-Everything still works up to that last hop, and it is all verified:
-
-- 45 of 45 rollable buttons read off a live sheet
-- capture-phase interception ahead of D&D Beyond's own menu
-- base64url message, ~90 characters, well inside any measured ceiling
-- `window.location.href` — the one launch Chrome permits (see below)
-- the panel decodes, queues if mid-boot, and stages with roll mode and
-  effects applied — a click with advantage and Bless produced two d20 groups
-  plus a separate `Bless 1d4`
-
-If it is ever unblocked, that is the whole feature working. Worth re-testing
-after a TaleSpire update; it may be a bug rather than a policy. It is also
-worth checking whether `talespire://dice/` behaves differently, since that verb
-needs no Symbiote — it would cost advantage, effects, chat attribution and the
-GM's damage inbox, which is why it was not the first choice.
-
-## How it was built
-
-`rolls.js` reads the rollable buttons off a D&D Beyond sheet. Verified against
-a live level-3 cleric: **45 of 45 buttons** classified — 6 abilities, 6 saves,
-18 skills, initiative, 8 attacks and 6 damage rolls — each with its real name
-and roll (`Club | 1d4+2`, `Guiding Bolt | 4d6`, `Shillelagh | 1d20+5`).
-
-Two things make it survivable. D&D Beyond's buttons carry **no roll data** —
-a skill button's whole content is the string `+2` — so meaning comes from
-position, and the trick is which class names to trust:
-
-| | |
-|---|---|
-| `integrated-dice__container` | stable, the hook |
-| `ct-*`, `ddbc-*` | stable component names, used to classify |
-| `F8U5pq_button` | a build hash — never matched on |
-
-And damage is identified by **printing dice**, not by its container. Damage
-buttons sit *inside* attack rows, so container-first classification calls them
-attacks — "Club attack 1d4+2" is a wrong result rather than a wrong label,
-since a d20 roll and a damage roll are not interchangeable.
-
-`Rolls.probe()` reports coverage. Run it on a sheet after a D&D Beyond update:
-if `unmatched` climbs, a selector has gone stale and the sample says where.
-
-`content.js` intercepts the click, `link.js` sends it. Interception is **off by
-default** and toggled from the popup — D&D Beyond's own dice are perfectly good,
-and an extension that silently hijacks every click on someone's sheet is one
-they uninstall. The listener runs in the capture phase, because these buttons
-open a menu and a bubbling listener arrives too late.
-
-The roll travels as base64url in a `talespire://symbiote/<id>/…` URL, about 150
-characters against a measured 1984-character ceiling. base64url specifically:
-standard base64's `/` would split the URL path.
-
-Arriving as the panel's own code is the entire point, and it shows. A click on
-D&D Beyond with advantage set and Bless active stages:
-
-    Shillelagh (Adv)  1d20+5
-    Shillelagh (Adv)  1d20+5
-    Bless             1d4
-
-— two d20s to compare and a separate buff die, thrown quietly so the panel can
-report the surviving one. A raw `talespire://dice/` URL can do none of that.
-
-### Launching the URL
-
-Chrome only launches an external protocol while a real user gesture is live,
-and it is strict about what counts. Two plausible methods are both refused with
-*"Not allowed to launch … because a user gesture is required"*:
-
-| Method | Why it fails |
-|---|---|
-| `a.click()` on a created anchor | a synthesised click is `isTrusted: false` and carries no activation, even inside a real handler |
-| hidden `iframe.src` | a subframe navigating to an external protocol is the case browsers hardened against |
-
-What works is a direct `window.location.href = url` during the real click.
-It does **not** navigate the page — for a registered custom scheme the browser
-hands off to the handler and the document stays put. Verified on a live sheet:
-`navigator.userActivation.isActive` true, no refusal, sheet still loaded.
-
-Only one method fires. Trying several "to be safe" would send the same roll
-twice the moment more than one is permitted, and two sets of dice in someone's
-game is a worse failure than none.
-
-The call must be synchronous from the click handler; anything awaited first
-spends the activation. `open()` warns when activation has already gone, because
-Chrome's own message names the cause but not the culprit.
+The working implementation is in git history if the constraint ever lifts:
+`rolls.js` read 45 of 45 buttons off a live sheet, `content.js` intercepted
+clicks ahead of D&D Beyond's own menu, and the panel staged the result with roll
+mode and effects applied. Re-test the Symbiote verb after a TaleSpire update
+using the link probe in `spirekeeper_v2/symbiote`.
 
 ## Next
 
