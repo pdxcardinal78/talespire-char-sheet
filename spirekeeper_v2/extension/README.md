@@ -70,9 +70,37 @@ token path. The popup reports "Read using your signed-in session" for **both
 public and private** characters, and a private character imports — so the
 "set privacy to Public" requirement is gone.
 
+## Rolling (in progress)
+
+`rolls.js` reads the rollable buttons off a D&D Beyond sheet. Verified against
+a live level-3 cleric: **45 of 45 buttons** classified — 6 abilities, 6 saves,
+18 skills, initiative, 8 attacks and 6 damage rolls — each with its real name
+and roll (`Club | 1d4+2`, `Guiding Bolt | 4d6`, `Shillelagh | 1d20+5`).
+
+Two things make it survivable. D&D Beyond's buttons carry **no roll data** —
+a skill button's whole content is the string `+2` — so meaning comes from
+position, and the trick is which class names to trust:
+
+| | |
+|---|---|
+| `integrated-dice__container` | stable, the hook |
+| `ct-*`, `ddbc-*` | stable component names, used to classify |
+| `F8U5pq_button` | a build hash — never matched on |
+
+And damage is identified by **printing dice**, not by its container. Damage
+buttons sit *inside* attack rows, so container-first classification calls them
+attacks — "Club attack 1d4+2" is a wrong result rather than a wrong label,
+since a d20 roll and a damage roll are not interchangeable.
+
+`Rolls.probe()` reports coverage. Run it on a sheet after a D&D Beyond update:
+if `unmatched` climbs, a selector has gone stale and the sample says where.
+
+Still to build: intercepting the click, and sending the roll to TaleSpire over
+a Symbiote URL.
+
 ## Next
 
-Rolling. Deliberately second: Beyond the Spire already does it well, and it is
+After rolling: Beyond the Spire already does it well, and it is
 the half that breaks whenever D&D Beyond restyles its sheet. When it happens it
 should go over a Symbiote URL rather than `talespire://dice/`, so rolls arrive
 as Spirekeeper's own code and keep advantage, chat attribution and the GM's
