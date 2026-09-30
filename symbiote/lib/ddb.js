@@ -940,7 +940,7 @@ function spellcasting(data, scores, pb, level) {
       ability: key,
       saveDc: 8 + pb + abilityMod,
       attackBonus: pb + abilityMod,
-      spells: classSpells.map((sp) => normalizeSpell(sp, level, abilityMod)),
+      spells: classSpells.map((sp) => normalizeSpell(sp, level, abilityMod, pb)),
     });
   }
 
@@ -950,7 +950,7 @@ function spellcasting(data, scores, pb, level) {
   const bestMod = blocks.reduce((best, b) => Math.max(best, b.saveDc - 8 - pb), 0);
   const extras = [];
   for (const [source, list] of Object.entries(data.spells || {})) {
-    for (const s of list || []) extras.push({ ...normalizeSpell(s, level, bestMod), grantedBy: source });
+    for (const s of list || []) extras.push({ ...normalizeSpell(s, level, bestMod, pb), grantedBy: source });
   }
   if (extras.length) {
     blocks.push({ className: "Other sources", ability: null, spells: extras });
@@ -1146,7 +1146,7 @@ function scaledDiceCount(m, d, level) {
  * without saying so in any machine-readable field.
  */
 function spellDice(d, level, abilityMod = 0) {
-  const out = { damage: [], healing: null, upcast: null, variants: [] };
+  const out = { damage: [], healing: null, healingFlat: 0, upcast: null, variants: [] };
   const scale = d.level === 0 && d.scaleType === "characterlevel" ? cantripMultiplier(level) : 1;
 
   for (const m of d.modifiers || []) {
@@ -1166,7 +1166,13 @@ function spellDice(d, level, abilityMod = 0) {
         roll: count ? `${count}d${m.die.diceValue}${flat ? signed(flat) : ""}` : String(flat),
       });
     } else if (m.type === "bonus" && m.subType === "hit-points") {
-      out.healing = `${count}d${m.die.diceValue}`;
+      // Healing carries the caster's modifier exactly the way damage does —
+      // "regains Hit Points equal to 2d4 plus your spellcasting ability
+      // modifier" is `usePrimaryStat`, never written into the dice string. Read
+      // only the dice and Healing Word heals 2d4 for a +3 Wisdom cleric.
+      const flat = (m.die.fixedValue || 0) + (m.usePrimaryStat ? abilityMod : 0);
+      out.healingFlat = flat;
+      out.healing = `${count}d${m.die.diceValue}${flat ? signed(flat) : ""}`;
     }
   }
 
@@ -1203,12 +1209,16 @@ function spellDice(d, level, abilityMod = 0) {
 function upcastRolls(spell, slotLevel) {
   const base = { damage: spell.damage?.[0]?.roll || null, healing: spell.healing || null };
 
+  // The caster's modifier is added once, not once per die, so it survives every
+  // upcast untouched. Both paths below rebuild the dice and re-attach it.
+  const heal = (dice) => `${dice}${spell.healingFlat ? signed(spell.healingFlat) : ""}`;
+
   // A spell filled in from the bundled SRD carries the resolved dice for every
   // slot level, which beats re-deriving a progression from prose.
   if (spell.upcastTable) {
     const at = spell.upcastTable[String(slotLevel)];
     if (!at) return base;
-    return spell.healing ? { ...base, healing: at } : { ...base, damage: at };
+    return spell.healing ? { ...base, healing: heal(at) } : { ...base, damage: at };
   }
 
   const up = spell.upcast;
@@ -1220,8 +1230,10 @@ function upcastRolls(spell, slotLevel) {
   const extra = up.count * steps;
 
   if (up.kind === "healing" && spell.healing) {
-    const m = /^(\d+)d(\d+)$/.exec(spell.healing);
-    if (m) return { ...base, healing: `${parseInt(m[1], 10) + extra}d${m[2]}` };
+    // Anchored on the dice alone: the stored string may carry the caster's
+    // modifier ("2d4+3"), which `heal` puts back after the dice are rebuilt.
+    const m = /^(\d+)d(\d+)/.exec(spell.healing);
+    if (m) return { ...base, healing: heal(`${parseInt(m[1], 10) + extra}d${m[2]}`) };
   }
 
   if (up.kind === "damage" && spell.damage?.length) {
@@ -1232,12 +1244,35 @@ function upcastRolls(spell, slotLevel) {
   return base;
 }
 
-function normalizeSpell(s, level, abilityMod = 0) {
+/**
+ * D&D Beyond's `resetType`, as words. Uses attach to both actions and spells —
+ * Magic Initiate's free cast is a `limitedUse` on the spell itself — so the map
+ * and the maximum are shared rather than spelled out twice.
+ */
+const USE_RESET = { 1: "short rest", 2: "long rest", 3: "dawn", 4: "special" };
+
+/**
+ * The use budget on a payload entry, or null when it has none.
+ *
+ * `maxUses` is 0 for anything whose budget *is* the proficiency bonus, so the
+ * real maximum has to be worked out before asking whether there is one.
+ */
+function limitedUseOf(entry, pb) {
+  const lu = entry?.limitedUse;
+  if (!lu) return null;
+  const max = (lu.maxUses || 0) + (lu.useProficiencyBonus ? pb : 0);
+  if (max <= 0) return null;
+  const used = lu.numberUsed || 0;
+  return { max, used, remaining: max - used, resetsOn: USE_RESET[lu.resetType] || "unknown" };
+}
+
+function normalizeSpell(s, level, abilityMod = 0, pb = 0) {
   const d = s.definition || {};
   const dice = spellDice(d, level, abilityMod);
   return {
     damage: dice.damage,
     healing: dice.healing,
+    healingFlat: dice.healingFlat,
     upcast: dice.upcast,
     variants: dice.variants,
     canUpcast: Boolean(d.canCastAtHigherLevel) && d.level > 0,
@@ -1265,6 +1300,15 @@ function normalizeSpell(s, level, abilityMod = 0) {
     saveAbility: ABILITIES.find((a) => a.id === d.saveDcAbilityId)?.name || null,
     description: stripHtml(d.description),
     higherLevels: stripHtml(d.atHigherLevels?.higherLevelDefinitions?.[0]?.details),
+
+    // A spell that comes with its own uses: Magic Initiate grants Goodberry with
+    // one free cast per long rest, which the payload states here and nowhere
+    // else. Dropping it left the spell looking like any other — castable only by
+    // spending a slot it doesn't need.
+    limitedUse: limitedUseOf(s, pb),
+    // False for feat, species and item spells, which are cast without a slot.
+    // Absent on class spells, which always need one.
+    usesSpellSlot: s.usesSpellSlot !== false,
   };
 }
 
@@ -1333,27 +1377,90 @@ function resolveTemplates(text, ctx) {
   if (!text) return "";
 
   return text.replace(/\{\{([^}]+)\}\}/g, (whole, body) => {
-    const save = /^savedc:(\w+)$/i.exec(body);
-    if (save) {
-      const mod = ctx.abilities[save[1].toLowerCase()]?.mod;
-      return mod === undefined ? whole : String(8 + ctx.pb + mod);
-    }
+    const { expr, sign, clamps } = tokenParts(body);
 
-    const modifier = /^modifier:(\w+)(#unsigned)?$/i.exec(body);
-    if (modifier) {
+    // How the number reads when the token doesn't say: an ability modifier is a
+    // bonus and carries its sign, everything else is a plain count.
+    let value = null;
+    let defaultSign = "plain";
+
+    const save = /^savedc:(\w+)$/i.exec(expr);
+    const modifier = /^modifier:(\w+)$/i.exec(expr);
+
+    // "You can use this class's Channel Divinity {{scalevalue}} times per Long
+    // Rest" — for an action with a use budget, that budget *is* the scale value.
+    // Anywhere else it means something the payload doesn't say, and is left be.
+    if (/^scalevalue$/i.test(expr)) {
+      if (ctx.scaleValue == null) return whole;
+      value = ctx.scaleValue;
+    } else if (save) {
+      const mod = ctx.abilities[save[1].toLowerCase()]?.mod;
+      if (mod === undefined) return whole;
+      value = 8 + ctx.pb + mod;
+    } else if (modifier) {
       const mod = ctx.abilities[modifier[1].toLowerCase()]?.mod;
       if (mod === undefined) return whole;
-      return modifier[2] ? String(Math.abs(mod)) : signed(mod);
+      value = mod;
+      defaultSign = "signed";
+    } else {
+      // Scaling expressions: "1+(classlevel/7)@rounddown", "classlevel".
+      value = evalScaling(expr, ctx.level);
+      if (value === null) return whole;
     }
 
-    // Scaling expressions: "1+(classlevel/7)@rounddown,max:..." — evaluate the
-    // first clause and cap it with the max clause if there is one.
-    const [primary, maxClause] = body.split(/,max:/i);
-    const value = evalScaling(primary, ctx.level);
-    if (value === null) return whole;
-    const cap = maxClause ? evalScaling(maxClause, ctx.level) : null;
-    return String(cap === null ? value : Math.min(value, cap));
+    for (const c of clamps) {
+      const limit = evalScaling(c.expr, ctx.level);
+      if (limit === null) continue;
+      value = c.kind === "min" ? Math.max(value, limit) : Math.min(value, limit);
+    }
+
+    const how = sign || defaultSign;
+    if (how === "signed") return signed(value);
+    if (how === "unsigned") return String(Math.abs(value));
+    return String(value);
   });
+}
+
+/**
+ * Peel the decorations D&D Beyond stacks onto a template token.
+ *
+ *   "modifier:wis@min:1#unsigned" -> { expr: "modifier:wis", sign: "unsigned",
+ *                                      clamps: [{ kind: "min", expr: "1" }] }
+ *   "classlevel#signed"           -> { expr: "classlevel", sign: "signed" }
+ *
+ * Decoration can hang off any kind of token, and reading it as part of the token
+ * sank the whole thing: Twilight Sanctuary's temporary hit points read
+ * "1d6{{classlevel#signed}}" in the rules text and carried no rollable number,
+ * and Eyes of Night showed "{{modifier:wis@min:1#unsigned}}" willing creatures.
+ * The `,max:` spelling predates `@max:` and still turns up, so both are taken.
+ */
+function tokenParts(body) {
+  let expr = String(body);
+  let sign = null;
+  const clamps = [];
+
+  const hash = /#(signed|unsigned)\b/i.exec(expr);
+  if (hash) {
+    sign = hash[1].toLowerCase();
+    expr = expr.slice(0, hash.index) + expr.slice(hash.index + hash[0].length);
+  }
+
+  // A clamp's value runs to the next clamp or the end of the token, because it
+  // can be an expression in its own right, `@rounddown` and all:
+  // "1+(classlevel/7)@rounddown,max:1+(classlevel/13)@rounddown+(classlevel/18)@rounddown".
+  const MARK = /[@,](min|max):/i;
+  let mark;
+  while ((mark = MARK.exec(expr))) {
+    const rest = expr.slice(mark.index + mark[0].length);
+    const next = MARK.exec(rest);
+    clamps.push({
+      kind: mark[1].toLowerCase(),
+      expr: (next ? rest.slice(0, next.index) : rest).trim(),
+    });
+    expr = expr.slice(0, mark.index) + (next ? rest.slice(next.index) : "");
+  }
+
+  return { expr: expr.trim(), sign, clamps };
 }
 
 /** Arithmetic over `classlevel` with D&D Beyond's `@rounddown` suffix. */
@@ -1384,7 +1491,6 @@ function evalScaling(expr, level) {
  * back to their parent by that prefix and offered as options on the parent.
  */
 function actionsAndResources(data, scores, pb, level) {
-  const RESET = { 1: "short rest", 2: "long rest", 3: "dawn", 4: "special" };
   const ctx = { abilities: scores, pb, level };
 
   const flat = [];
@@ -1392,12 +1498,39 @@ function actionsAndResources(data, scores, pb, level) {
     for (const a of entries || []) flat.push({ ...a, source });
   }
 
-  const describe = (a) => resolveTemplates(stripHtml(a.snippet || a.description), ctx).slice(0, 400);
+  // Long enough for an option that states two alternatives — Twilight Sanctuary
+  // spends its first 400 characters getting to the end of the first one.
+  const useBudget = (a) => limitedUseOf(a, pb)?.max ?? null;
+
+  const describe = (a) =>
+    resolveTemplates(stripHtml(a.snippet || a.description), { ...ctx, scaleValue: useBudget(a) }).slice(0, 600);
+
+  /**
+   * Dice stated only in the rules text.
+   *
+   * Some actions carry no `dice` object at all: Twilight Sanctuary's temporary hit
+   * points live in its snippet as "1d6{{classlevel#signed}}" and nowhere else, so
+   * it offered no roll to make. Read the first dice expression out of the resolved
+   * text instead — by then the templates are numbers.
+   *
+   * d20 is skipped on purpose: in an action's prose a d20 is a check somebody is
+   * being asked to make, not the action's own roll.
+   */
+  const SNIPPET_DICE = /(\d*)d(\d+)\s*([+-]\s*\d+)?/g;
+
+  function snippetRoll(a) {
+    const text = resolveTemplates(stripHtml(a.snippet || a.description), ctx);
+    for (const m of text.matchAll(SNIPPET_DICE)) {
+      if (parseInt(m[2], 10) === 20) continue;
+      return `${m[1] || "1"}d${m[2]}${(m[3] || "").replace(/\s+/g, "")}`;
+    }
+    return null;
+  }
 
   /** Roll string for an action: its dice plus the ability it keys off, if any. */
   function actionRoll(a) {
     const dice = a.dice?.diceString;
-    if (!dice) return null;
+    if (!dice) return snippetRoll(a);
     const key = ABILITIES.find((ab) => ab.id === a.abilityModifierStatId)?.key;
     const mod = key ? scores[key].mod : 0;
     return `${dice}${mod ? signed(mod) : ""}`;
@@ -1433,20 +1566,12 @@ function actionsAndResources(data, scores, pb, level) {
 
   const resources = [];
   for (const a of flat) {
-    const lu = a.limitedUse;
-    if (!lu) continue;
-
-    // maxUses is 0 for anything whose budget IS the proficiency bonus, so it can't
-    // be used as the "has uses" test — compute the real maximum first.
-    const max = (lu.maxUses || 0) + (lu.useProficiencyBonus ? pb : 0);
-    if (max <= 0) continue;
+    const uses = limitedUseOf(a, pb);
+    if (!uses) continue;
 
     resources.push({
       name: a.name,
-      max,
-      used: lu.numberUsed || 0,
-      remaining: max - (lu.numberUsed || 0),
-      resetsOn: RESET[lu.resetType] || "unknown",
+      ...uses,
       description: describe(a),
       options: children.get(a.name) || [],
     });
@@ -1567,7 +1692,7 @@ function features(data) {
  * compares this against the stamp on a stored sheet and re-derives when they
  * differ. Bump it whenever a change alters what normalize() returns.
  */
-const NORMALIZER_VERSION = "0.10.0";
+const NORMALIZER_VERSION = "0.12.0";
 
 function normalize(payload, options = {}) {
   const data = applyEquipment(payload.data || payload, options.equipment);

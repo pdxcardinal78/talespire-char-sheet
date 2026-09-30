@@ -70,6 +70,17 @@ const Spells = (() => {
   };
 
   /**
+   * "…regains Hit Points equal to 2d8 plus your spellcasting ability modifier."
+   *
+   * The bundled records carry the dice in `damage_roll` and the modifier nowhere
+   * at all — it lives only in the prose, so the prose is where it gets read
+   * from. Healing Word filled in from the SRD healed its dice and no more.
+   */
+  const ADDS_CASTER_MOD = /plus your spellcasting ability modifier/i;
+
+  const signed = (n) => (n < 0 ? String(n) : `+${n}`);
+
+  /**
    * Open5e's `attack_roll` is not reliable — Faerie Fire carries it despite
    * being a Dexterity save with no attack. A spell that names a saving throw is
    * a save spell, so the save wins wherever the two disagree.
@@ -81,8 +92,10 @@ const Spells = (() => {
    * spell is indistinguishable from an imported one apart from its source line.
    *
    * `characterLevel` only matters for cantrips, whose dice scale on it.
+   * `abilityMod` is the caster's spellcasting modifier, for the healing spells
+   * whose text adds it.
    */
-  function toSheetSpell(rec, { characterLevel = 1, source = null } = {}) {
+  function toSheetSpell(rec, { characterLevel = 1, source = null, abilityMod = 0 } = {}) {
     const dice = parseDice(rec.damage_roll);
     const heals = Boolean(rec.damage_roll) && !(rec.damage_types || []).length;
     const scale = rec.level === 0 ? cantripMultiplier(characterLevel) : 1;
@@ -93,13 +106,19 @@ const Spells = (() => {
       roll: `${dice.count * scale}d${dice.sides}${dice.flat ? `+${dice.flat}` : ""}`,
     };
 
+    // Healing keeps its flat part separate, so upcasting can rebuild the dice
+    // and put the modifier back once rather than once per slot level.
+    const healFlat = heals && ADDS_CASTER_MOD.test(rec.desc || "") ? abilityMod : 0;
+    const healTotal = (rolled?.flat || 0) + healFlat;
+
     return {
       name: rec.name,
       level: rec.level,
       school: rec.school || null,
 
       damage: !heals && rolled ? [{ type: (rec.damage_types || [])[0] || null, ...rolled }] : [],
-      healing: heals && rolled ? rolled.roll : null,
+      healing: heals && rolled ? `${rolled.count}d${rolled.sides}${healTotal ? signed(healTotal) : ""}` : null,
+      healingFlat: healTotal,
       // Absolute dice per slot level, straight from the source data — more exact
       // than re-deriving a progression from the "at higher levels" sentence.
       upcastTable: rec.upcast || null,
@@ -134,9 +153,76 @@ const Spells = (() => {
     };
   }
 
+  // --- monster spells ------------------------------------------------------
+
+  /**
+   * One spell out of a monster's statblock, resolved and dressed in the
+   * statblock's own numbers.
+   *
+   * A statblock states its save DC and spell attack bonus once, for everything
+   * the creature casts, and never restates the spell itself. So the dice come
+   * from the bundled list and the numbers to beat come from the monster — and
+   * where the two could disagree, the monster wins, because the monster is the
+   * thing being run.
+   *
+   * `override` is the GM's word on top of both, for the times a statblock is a
+   * starting point rather than a rule: the fire cultist's fireball that has to
+   * come out cold. It replaces values, never merges into them.
+   *
+   * Call `loadBundled()` first — this is synchronous so the statblock can render
+   * in one pass.
+   */
+  function monsterSpell(ref, block, { casterLevel = 1, abilityMod = 0, override = {} } = {}) {
+    const rec = index?.get(key(ref.name)) || index?.get(key(ref.name).replace(/\s+/g, "")) || null;
+    const base = rec ? toSheetSpell(rec, { characterLevel: casterLevel, abilityMod }) : null;
+
+    // Whichever dice the spell rolls — a heal is as worth overriding as a hit.
+    const rolled = base?.damage?.[0]?.roll || base?.healing || null;
+    const heals = Boolean(base?.healing) && !base?.damage?.length;
+
+    const edits = Object.entries(override).filter(([, v]) => v != null && v !== "");
+
+    return {
+      // Stable under renaming and re-resolution: what the statblock printed.
+      key: key(ref.name),
+      name: rec?.name || TITLE(ref.name),
+      // The restriction the statblock put in brackets — "self only", "air
+      // elemental only". Never part of the spell, never dropped either.
+      note: ref.note || null,
+      found: Boolean(rec),
+
+      level: base?.level ?? null,
+      school: base?.school || null,
+      castingTime: base?.castingTime || null,
+      range: base?.range || null,
+      duration: base?.duration || null,
+      components: base?.components || null,
+      concentration: Boolean(base?.concentration),
+      ritual: Boolean(base?.ritual),
+      description: base?.description || "",
+
+      requiresAttackRoll: Boolean(base?.requiresAttackRoll),
+      requiresSavingThrow: Boolean(base?.requiresSavingThrow),
+      saveAbility: base?.saveAbility || null,
+
+      toHit: override.toHit ?? block.toHit ?? null,
+      saveDc: override.saveDc ?? block.saveDc ?? null,
+      dice: override.dice ?? rolled,
+      damageType: override.damageType ?? base?.damage?.[0]?.type ?? null,
+      heals,
+
+      // So the panel can mark what it was told to change and offer it back.
+      edited: edits.length > 0,
+      override,
+    };
+  }
+
   return {
     loadBundled,
     find,
+    /** How a spell name is matched and how an override is filed against it. */
+    spellKey: key,
+    monsterSpell,
     toSheetSpell,
     get licenses() {
       return bundled?.licenses || [];

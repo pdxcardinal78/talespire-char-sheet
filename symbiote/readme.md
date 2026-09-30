@@ -34,6 +34,16 @@ Each one shows what it does to you, with the full rules on hover, and exhaustion
 works out the penalty for the level you're on. Conditions are never folded into
 your rolls — shift-click a roll for advantage, ctrl-click for disadvantage.
 
+## Session notes
+
+The **Notes** tab is somewhere to write things down mid-session — a name, a
+rumour, what the door was trapped with — without leaving TaleSpire. Type and
+press Enter; notes list newest first with the time you took them. Click one to
+edit it, `×` twice to delete it.
+
+Notes belong to the character and stay on this machine. Nothing is posted to
+chat, the party can't see them, and a rest doesn't clear them.
+
 ## Spells your subclass grants
 
 D&D Beyond names a subclass's always-prepared spells in the feature's rules text
@@ -45,6 +55,14 @@ The panel reads those names and fills in the details from the 2024 SRD it ships,
 listing them under a heading that says where they came from. They cast, upcast
 and post their save DC like any other spell. A spell outside the SRD is listed by
 name with a note rather than silently dropped.
+
+## Spells that bring their own uses
+
+A spell from a feat — Magic Initiate's Goodberry, say — often comes with one free
+cast per long rest, on top of any slots you could spend on it. Those are marked
+**free use**, and the card offers the free cast next to the slots: `Cast using
+Free 1/1 · L1 · L2`. The free one is picked for you, and once it's gone the card
+drops back to a slot of the spell's own level. A long rest hands it back.
 
 ## Rolling
 
@@ -104,6 +122,33 @@ internet, so it stays off until you ask for it.
 
 **Speak as…** picks a mini, and from then on monster rolls post as that creature
 instead of as you.
+
+## A monster's spells
+
+A caster's statblock prints its spells as a paragraph of names. The panel reads
+that paragraph and looks every spell up, so a Mage's fireball arrives as `8d6`
+fire against DC 14 with a button that rolls it, rather than as the word
+"fireball". Tap a spell's name to see what it does.
+
+What each spell costs is tracked the way the statblock states it. A level's slots
+are pips on its heading; a `3/day each` spell keeps its own count on its own row.
+Click a pip to spend one, right-click to give it back — or press **Cast**, which
+spends one and says so in chat.
+
+## Changing a monster's spells
+
+A statblock is a starting point as often as it is a rule, so `✎` on any spell
+opens four fields: dice, damage type, save DC, to hit. Each shows what it would be
+if you left it alone, so the cult that worships a frost god gets `cold` typed into
+one box and throws cold fireballs. Clear a field to put it back, or press
+**Reset**.
+
+Changes belong to the fight, not the monster: reskin a cultist's fireball and
+every cultist in *that* encounter throws it, while the same monster in another
+fight is untouched. Spent slots belong to the individual, so one mage running dry
+doesn't drain the others. A monster opened straight from the search isn't in a
+fight, so its slots and changes last only until you close the panel — it says so
+under the form.
 
 ## Fights
 

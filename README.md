@@ -161,6 +161,19 @@ TaleSpire's campaign storage as you play.
   Rules text is template-resolved on import — `DC {{savedc:wis}}` becomes `DC 13`, and
   `{{1+(classlevel/7)@rounddown}}d8{{modifier:wis}}` becomes `1d8+3`. Tokens the panel
   can't evaluate are left visible rather than blanked or guessed at.
+  Decoration is peeled off a token before it's read, because it hangs off every kind:
+  `{{classlevel#signed}}` and `{{modifier:wis@min:1#unsigned}}` resolve like any other.
+  Where an option states its dice only in its prose and carries no dice of its own —
+  Twilight Sanctuary's `1d6` plus your cleric level is a snippet and nothing more —
+  the first dice expression in the resolved text becomes its roll. A `d20` in that
+  text is skipped: in an action's prose a d20 is a check someone else is being asked
+  to make, not the action's own roll.
+- **Spells that come with their own uses** — Magic Initiate grants a level-1 spell with
+  one free cast per long rest, which the payload states on the spell and nowhere else.
+  Those spells are marked *free use* and offer the free cast as a way to pay alongside
+  any slots: `Cast using [Free 1/1] [L1] [L2]`. The free use is preselected, because
+  that's what it's for, and falls back to a slot at the spell's own level once spent —
+  never up to a bigger slot, which would change the dice without being asked.
 - **Short rest** — restores pact slots and anything that resets on a short rest.
   Hit dice stay spent; spend them individually to heal.
 - **Long rest** — HP to full, all slots and resources back, and half your *total*
@@ -202,6 +215,19 @@ node dev/compaction-test.mjs path/to/character.json
 
 Characters imported before this existed have no stored payload; the tab says so
 and asks for a re-import.
+
+## Session notes
+
+The **Notes** tab is a scratchpad for the things a session generates and a character
+sheet has nowhere to put: a name, a rumour, what the door was trapped with. Type and
+press Enter to keep a note; they list newest first with the time they were taken.
+Click a note to edit it in place, and `×` twice to delete it — twice because
+everything else on the panel can be re-derived from the import or handed back with
+`↺`, and a note that's gone is gone.
+
+Notes are play state, so they belong to the character, survive a re-import, and a rest
+doesn't clear them. They're never posted to chat and never leave the machine: the point
+is writing something down without leaving TaleSpire, not sending it anywhere.
 
 ## Storage
 
@@ -278,7 +304,7 @@ right rolls automatically:
 | Effect | Bonus | Applies to |
 |---|---|---|
 | Bless / Bane | ±1d4 | attack rolls, saving throws |
-| Guidance | +1d4 | ability and skill checks, once |
+| Guidance | +1d4 | ability and skill checks, until you end it |
 | Resistance | +1d4 | saving throws, once |
 | Bardic Inspiration | +1d6 | attacks, saves, checks, once |
 | Shield of Faith / Haste | +2 | AC |
@@ -293,7 +319,9 @@ the effect. Magic Weapon +1 works the same way with a flat bonus.
 
 A custom effect takes a name, a bonus like `+2` or `1d4`, and which rolls it touches.
 Click an effect to suspend it, `×` to remove it. Anything marked *once* suspends
-itself after the roll that used it. AC effects change the displayed AC, which shows
+itself after the roll that used it. Guidance isn't one of them — it runs its minute
+and the panel can't know which check you're saving the die for, so it keeps applying
+until you suspend it, remove it, or drop concentration. AC effects change the displayed AC, which shows
 an asterisk and explains itself on hover. A long rest clears every effect.
 
 ## Passing effects to other players
@@ -389,6 +417,13 @@ for spells that plainly scale — so it is parsed from the rules text, which is 
 boilerplate: "The damage increases by 1d6 for each spell slot level above 1." A spell
 whose scaling doesn't parse still upcasts, it just doesn't change dice, which is
 correct for spells that scale in targets or duration instead.
+
+**Healing carries the caster's modifier.** "Regains Hit Points equal to 2d4 plus your
+spellcasting ability modifier" is a flag on the payload's modifier (`usePrimaryStat`),
+never part of the dice string — so Healing Word reads `2d4+3` for a +3 Wisdom cleric,
+and keeps the `+3` at every slot level (`4d4+3`, `6d4+3`), because the modifier is
+added once per cast and not once per die. Spells filled in from the bundled SRD carry
+no such flag at all, so there the same sentence is read out of the spell's own text.
 
 **Conditional damage is offered, never assumed.** Toll the Dead's "1d12 if the target
 is missing any of its Hit Points" is pulled from the same text and shown as an
@@ -497,6 +532,63 @@ three things in it are not trustworthy and the normalizer works around each:
   are no dice at all ("Hit: 1 piercing damage") the flat number is shown rather
   than rolled — the leading figure on a dice attack is the average, and rolling
   it would be wrong.
+
+### A monster's spells
+
+Everything else in a statblock arrives structured; spells arrive as a paragraph.
+Open5e keeps a caster's whole repertoire as one block of prose inside a
+`Spellcasting` trait — a sentence naming the save DC, then a bulleted list of
+level headings and comma-separated names:
+
+    The mage is a 9th-level spellcaster. Its spellcasting ability is Intelligence
+    (spell save DC 14, +6 to hit with spell attacks)...
+    * 3rd level (3 slots): counterspell, fireball, fly
+
+That reads fine and plays badly: the GM has a fireball to throw and has to go
+look up what fireball does. So the paragraph is parsed into groups and every name
+is resolved against the same bundled 2024 SRD spell list the character sheet uses
+for feature-granted spells — which turns "fireball" into `8d6` fire against DC 14,
+with a button that rolls it.
+
+Four heading shapes cover the SRD, and the parse keeps what each one means:
+
+| Printed | Costs |
+|---|---|
+| `Cantrips (at will)` | nothing |
+| `1st level (4 slots)` | a slot, shared across every spell at that level |
+| `At will` | nothing |
+| `3/day each` | one of *that spell's* three uses, not three between them |
+
+Slots draw as pips on the level heading; per-spell uses draw on the spell's own
+row. Click to spend, right-click to give one back, and **Cast** does both at once
+and announces it. Where the numbers could disagree the monster wins: the save DC
+and attack bonus come from the statblock, which states them once for everything
+the creature casts, while the dice come from the spell. A healing spell adds the
+creature's own modifier for the ability its statblock names, so a Couatl's cure
+wounds heals `2d8+4`.
+
+All 39 Spellcasting traits in the bundled SRD parse, and all 347 spell entries in
+them resolve. The single-spell form is included — a Dust Mephit's
+"can innately cast _sleep_", whose budget is in the trait's *name* rather than its
+text — as are the bracketed restrictions ("conjure elemental (air elemental only)"),
+which are kept as a note beside the spell rather than parsed into its name.
+
+### Changing a monster's spells
+
+A statblock is a starting point at least as often as it is a rule. The cult in
+*this* fight worships a frost god, so its mages throw fireballs that come out
+cold; the boss hits harder than the page says. So every spell has `✎`, which
+opens four fields — dice, damage type, save DC, to hit — each showing what it
+would be if left alone. Clearing a field is how you put it back; **Reset** puts
+back all four.
+
+Where a change is kept follows from what it is. What a monster has *spent* is
+that individual's: three mages in a fight have their own slots, and one of them
+emptying theirs doesn't touch the others, so it lives on the combatant. What has
+been *changed* is the fight's: reskinning a cultist's fireball means every
+cultist in that encounter, so it lives on the encounter, keyed by statblock. A
+monster opened from the search belongs to no fight, so it still casts and still
+takes changes — they just last until the panel closes, and the panel says so.
 
 ## GM: encounters and initiative
 
@@ -817,6 +909,21 @@ These are deliberate omissions, not bugs to trip over later:
 - **Resource options are matched by name.** A feature whose options aren't named
   `Parent: Child` won't group — they surface under their own prefix instead of
   vanishing, but the pairing is textual, not structural.
+- **Notes are private and local.** They're stored with the character on that machine,
+  never broadcast to the party and never synced anywhere. A player on another client
+  can't see them, and neither can the GM.
+- **Monster spells come from the 2024 SRD, and the statblocks are 2014.** The
+  bundled spell list is the one the character sheet uses, and the editions differ
+  on a few spells — 2014 sleep drops creatures by hit point total, 2024 sleep is a
+  save. The printed trait is always one click away on the statblock, and `✎` is
+  there for where it matters.
+- **A spell rolls one set of dice.** Open5e records a single `damage_roll` per
+  spell, so Ice Storm arrives as its bludgeoning dice without the cold ones, and
+  a spell whose text alone states its dice arrives with none. The dice field on
+  `✎` is the fix, and it is why that field exists as well as the damage type.
+- **Monster spells never upcast.** A statblock lists each spell under the level it
+  is cast at, so there is no scaling to work out; casting one from a higher group
+  means typing the bigger dice in.
 - **Storage is finite, but generous.** See §Storage. A GM would need well past ten
   level-20 characters to run out; a player never will.
 - **Ability score caps assume the modifiers are honest.** The 20 cap is applied and
@@ -846,7 +953,8 @@ hit dice, rests, slot spending and upcasting all round-trip through stored play 
 
 Effect routing was checked per roll type: with Bless and Guidance both active, an
 attack stages `d20+4` plus a `Bless 1d4` group, a skill check stages `Guidance 1d4`
-instead, a saving throw gets Bless again, and Guidance suspends itself after use.
+instead, a saving throw gets Bless again, and Guidance keeps adding its die to later checks
+until it's ended, while Bardic Inspiration suspends itself after the roll that used it.
 Temp HP refuses a smaller pool, and 9 damage against 6 temp HP leaves 20/23.
 
 A Rogue 8 / Sorcerer 8 / Warlock 4 resolves as: 12d8 (Rogue and Warlock merged) plus
@@ -861,6 +969,26 @@ Multiclass hit dice were checked across five splits: pools merge by die type
 others untouched, and long-rest recovery returns half the total — 5 of 10 for a
 Fighter 5 / Wizard 5, 3 of 6 for a Fighter 3 / Wizard 2 / Rogue 1, and a minimum of
 one for a level-1 character.
+
+Every Spellcasting trait in the bundled SRD was parsed and checked: 39 of 39
+traits produce groups, and all 347 spell entries in them resolve against the
+bundled spell list — slot casters (Mage, Lich, Archmage), innate casters
+(Couatl, Pit Fiend, Drow), the single-spell form (Dust Mephit, Magma Mephit,
+whose save DC sits in brackets where the name ends), and the two-trait case
+(Green Hag, which has an innate list and a coven list). In the panel, a Mage's
+fire bolt scales to `2d10` at its stated 9th caster level, fireball rolls `8d6`
+against DC 14, casting it spends a third-level slot and the pips follow, and
+reskinning it to `10d6` cold changes the button, the roll that reaches the tray
+and nothing else on the statblock. Across a reload, a two-Mage encounter kept the
+reskin on both mages and the spent slots on only the one that spent them.
+
+Healing, action dice and free casts were checked against a live Twilight Domain cleric
+export re-derived through the normalizer: Healing Word heals `2d4+3` and upcasts to
+`4d4+3`, Twilight Sanctuary offers `1d6+3` at cleric 3 where it previously offered no
+roll at all and printed `1d6{{classlevel#signed}}` in its rules text, Divine Spark still
+resolves its capped scaling expression to `1d8+3`, and Goodberry spends its one free
+cast, falls back to an L1 slot, and gets the cast back on a long rest. Notes round-trip
+through storage across a reload, including an in-place edit and a delete.
 
 Weapon effects were checked both ways: Shillelagh on a Club rebuilds it as
 `1d8+3 / +5` from Wisdom while leaving the Shortbow untouched, and a sheet saved by an

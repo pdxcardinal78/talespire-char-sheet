@@ -145,6 +145,7 @@
     <button class="tab" data-tab="spells" role="tab" aria-selected="false">Spells</button>
     <button class="tab" data-tab="checks" role="tab" aria-selected="false">Checks</button>
     <button class="tab" data-tab="gear" role="tab" aria-selected="false">Gear</button>
+    <button class="tab" data-tab="notes" role="tab" aria-selected="false">Notes</button>
     <button class="tab" data-tab="info" role="tab" aria-selected="false">Info</button>
   </nav>
 
@@ -223,6 +224,20 @@
     <div id="gear-worn"></div>
     <h2>Carried</h2>
     <div id="gear-carried"></div>
+  </div>
+
+  <!-- Session notes. Kept with the character and never posted anywhere: the
+       point is to write something down mid-fight without leaving TaleSpire. -->
+  <div id="tab-notes" class="tab-panel hidden" role="tabpanel">
+    <div class="note-add">
+      <input id="note-input" type="text" placeholder="Jot something down — Enter to keep it" autocomplete="off">
+      <button id="note-save" class="btn btn-small btn-primary">Add</button>
+    </div>
+    <div id="notes"></div>
+    <p class="hint">
+      Notes stay on this character, on this machine. Nothing is posted to chat, and
+      a rest doesn't clear them. Click a note to edit it.
+    </p>
   </div>
 
   <div id="tab-info" class="tab-panel hidden" role="tabpanel">

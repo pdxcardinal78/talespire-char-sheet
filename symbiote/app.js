@@ -25,6 +25,9 @@ const App = (() => {
     me: null, // { id, name } — how we tell whether a broadcast is for us
     selection: [],
     pending: [], // attacks awaiting a DM hit call, holding their damage
+    // Spent slots and spell changes for statblocks opened out of the search,
+    // which belong to no encounter and are forgotten when the panel closes.
+    monsterScratch: {},
   };
 
   /** Play state changes constantly; don't hammer TaleSpire's storage. */
@@ -113,7 +116,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.11.0";
+  const APP_VERSION = "0.12.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -470,8 +473,49 @@ const App = (() => {
   async function openCombatantStatblock(combatant) {
     const monster = combatant.cached || (await Monsters.get(combatant.slug));
     if (!monster) return toast("That statblock is no longer available.", true);
-    Bestiary.show(monster);
+    await Bestiary.show(monster, combatantSpellContext(combatant));
     showBestiary();
+  }
+
+  /**
+   * Where a combatant's spellcasting is kept.
+   *
+   * Two different things are being remembered and they belong in two different
+   * places. What's *spent* is the individual's: three mages in a fight each have
+   * their own slots, and killing one shouldn't refund the others. What's been
+   * *changed* is the encounter's: a GM reskinning a fire cultist's fireball as
+   * cold means every cultist in that fight, not one of them.
+   */
+  function combatantSpellContext(combatant) {
+    const enc = Encounters.current;
+    if (!enc) return scratchSpellContext(combatant.cached || { slug: combatant.slug, name: combatant.label });
+
+    const tweaks = (enc.spellTweaks ||= {});
+    return {
+      label: combatant.label,
+      persists: true,
+      state: {
+        uses: (combatant.spellUses ||= {}),
+        overrides: (tweaks[combatant.slug] ||= {}),
+      },
+      onChange: () => saveCurrentEncounter(),
+    };
+  }
+
+  /**
+   * A statblock opened out of the search belongs to no fight, so its slots and
+   * changes live for as long as the panel is open and no longer. Said out loud
+   * in the panel rather than left to be discovered.
+   */
+  function scratchSpellContext(monster) {
+    const scratch = (state.monsterScratch ||= {});
+    const slug = monster.slug || monster.name;
+    return {
+      label: monster.name,
+      persists: false,
+      state: (scratch[slug] ||= { uses: {}, overrides: {} }),
+      onChange: null,
+    };
   }
 
   /**
@@ -529,6 +573,15 @@ const App = (() => {
         context: { kind: spec.kind, creatureId: state.speaker?.id || null, target: state.target },
       });
       renderStaged();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  /** A monster saying what it just did, in its own voice where there is one. */
+  async function monsterAnnounce(text) {
+    try {
+      await Rolls.post(Rolls.bold(text), state.speaker?.id || null);
     } catch (e) {
       toast(e.message, true);
     }
@@ -728,6 +781,7 @@ const App = (() => {
     renderSpells(s);
     renderGear(s);
     renderChecks(s);
+    renderNotes();
     renderInfo(s);
   }
 
@@ -744,7 +798,12 @@ const App = (() => {
   const EFFECT_PRESETS = [
     { name: "Bless", bonus: "1d4", targets: ["attack", "save"], conc: true },
     { name: "Bane", bonus: "-1d4", targets: ["attack", "save"], conc: true },
-    { name: "Guidance", bonus: "1d4", targets: ["check"], once: true, conc: true },
+    // Guidance runs its minute whether or not the die has been spent, and the
+    // panel has no way to know which check the player is saving it for — so it
+    // stays armed and the player ends it themselves (suspend, ×, or dropping
+    // concentration). Marked `once`, it switched itself off after the first
+    // check of the cast and silently stopped buffing the rest of the minute.
+    { name: "Guidance", bonus: "1d4", targets: ["check"], conc: true },
     { name: "Resistance", bonus: "1d4", targets: ["save"], once: true, conc: true },
     { name: "Bardic Inspiration", bonus: "1d6", targets: ["attack", "save", "check"], once: true },
     { name: "Shield of Faith", bonus: "+2", targets: ["ac"], conc: true },
@@ -773,7 +832,9 @@ const App = (() => {
    * `addEffect` copies a preset's fields onto the stored effect, so a mistake in
    * the table above outlives the correction — Shillelagh was marked as costing
    * concentration, and a sheet that had it running kept holding the slot after
-   * the flag was fixed. Anything named after a preset takes the preset's answer.
+   * the flag was fixed; Guidance was marked `once`, and a sheet carrying one kept
+   * spending it on the first check. Anything named after a preset takes the
+   * preset's answer for both flags.
    */
   function reconcileEffects(play) {
     if (!play?.effects?.length) return;
@@ -781,6 +842,7 @@ const App = (() => {
       const preset = EFFECT_PRESETS.find((p) => p.name === fx.name);
       if (!preset) continue; // a custom effect is the player's own business
       fx.conc = Boolean(preset.conc);
+      fx.once = Boolean(preset.once);
     }
     // A concentration record pointing at an effect that no longer costs it.
     if (play.concentration && !play.effects.some((fx) => fx.id === play.concentration.effectId && fx.conc)) {
@@ -1354,6 +1416,9 @@ const App = (() => {
     for (const r of s.resources) {
       if (r.resetsOn === "short rest") s.play.resourcesUsed[r.name] = 0;
     }
+    for (const sp of allSpells(s)) {
+      if (sp.limitedUse?.resetsOn === "short rest") spellUsesUsed(s.play)[sp.name] = 0;
+    }
 
     render();
     savePlay();
@@ -1369,6 +1434,8 @@ const App = (() => {
     for (const slot of s.spellcasting.slots) s.play.slotsUsed[slot.level] = 0;
     s.play.pactUsed = 0;
     for (const r of s.resources) s.play.resourcesUsed[r.name] = 0;
+    // Every free cast comes back: a long rest ends a short-rest day too.
+    s.play.spellUsesUsed = {};
     await endConcentration({ silent: true });
     s.play.effects = []; // buffs don't survive the night
 
@@ -1918,10 +1985,15 @@ const App = (() => {
         console.error("[Spirekeeper] bundled spells unavailable", e);
         return; // no bundle, no fill — leave the list alone rather than half-render
       }
+      // A granted spell is cast with the granting class's ability, which is what
+      // decides whether it heals for its dice or its dice plus a modifier.
+      const block = s.spellcasting.blocks.find((b) => b.className === g.className);
+      const abilityMod = block?.ability ? s.abilities[block.ability]?.mod || 0 : 0;
+
       filled.push({
         ...g,
         spell: rec
-          ? Spells.toSheetSpell(rec, { characterLevel: s.identity?.level || 1 })
+          ? Spells.toSheetSpell(rec, { characterLevel: s.identity?.level || 1, abilityMod })
           : null,
       });
     }
@@ -2079,9 +2151,33 @@ const App = (() => {
     return chip;
   }
 
-  /** Levels this spell could be cast at, given what's left. */
+  /**
+   * Free uses spent on spells that come with their own, keyed by spell name.
+   *
+   * Seeded by the store, but created on demand here too: a sheet imported before
+   * spells could be tracked has play state without the map.
+   */
+  const spellUsesUsed = (play) => (play.spellUsesUsed ||= {});
+
+  /** Every spell on the sheet, wherever it came from. */
+  const allSpells = (s) => [
+    ...(s.spellcasting?.blocks || []).flatMap((b) => b.spells),
+    ...(state.granted || []).map((g) => g.spell).filter(Boolean),
+  ];
+
+  /** Ways this spell could be paid for, given what's left. */
   function castableLevels(s, spell) {
     const out = [];
+
+    // A spell can arrive with its own uses and no need for a slot at all — Magic
+    // Initiate grants Goodberry with one free cast per long rest. That use is
+    // offered as another way to pay, alongside any slots, because a player with
+    // slots to spare may want to keep the free one.
+    if (spell.limitedUse) {
+      const used = spellUsesUsed(s.play)[spell.name] || 0;
+      out.push({ level: spell.level, left: spell.limitedUse.max - used, kind: "free" });
+    }
+
     if (spell.level === 0) return out;
 
     for (const slot of s.spellcasting.slots) {
@@ -2108,6 +2204,7 @@ const App = (() => {
       `<span class="sp-name">${sp.prepared ? '<span class="prepared-dot">●</span> ' : ""}${escapeHtml(sp.name)}</span>` +
       (dice ? `<span class="sp-tag">${escapeHtml(dice)}</span>` : "") +
       (sp.upcast ? '<span class="sp-tag">scales</span>' : "") +
+      (sp.limitedUse ? '<span class="sp-tag">free use</span>' : "") +
       (sp.concentration ? '<span class="sp-tag">conc.</span>' : "");
 
     const body = document.createElement("div");
@@ -2127,8 +2224,8 @@ const App = (() => {
   function buildSpellBody(body, sp, block) {
     const s = state.sheet;
 
-    // The level this spell is currently set to go off at. Upcasting changes the
-    // dice, so everything below re-renders when it changes.
+    // How this spell is currently set to be paid for, and at what level.
+    // Upcasting changes the dice, so everything below re-renders when it changes.
     let chosen = sp.level;
     let chosenKind = "slot";
 
@@ -2146,7 +2243,27 @@ const App = (() => {
     const actions = document.createElement("div");
     actions.className = "spell-actions";
 
-    const options = castableLevels(s, sp);
+    let options = castableLevels(s, sp);
+
+    // Spend what the spell brought with it first — that's what it's for.
+    if (options.some((o) => o.kind === "free" && o.left > 0)) chosenKind = "free";
+
+    /**
+     * Re-read what's left and redraw. Called after casting, so a free use that
+     * was just spent shows as spent instead of inviting a second one.
+     */
+    function refresh() {
+      options = castableLevels(s, sp);
+      // Only the free use falls back: dropping to a slot of the spell's own level
+      // is the same choice the card opens on. Never step up to a bigger slot on
+      // the player's behalf — that would change the dice without being asked.
+      if (chosenKind === "free" && !options.some((o) => o.kind === "free" && o.left > 0)) {
+        chosen = sp.level;
+        chosenKind = "slot";
+      }
+      drawLevels();
+      drawActions();
+    }
 
     function drawLevels() {
       levelRow.replaceChildren();
@@ -2154,15 +2271,19 @@ const App = (() => {
 
       const caption = document.createElement("span");
       caption.className = "sp-tag";
-      caption.textContent = "Cast at";
+      caption.textContent = sp.limitedUse ? "Cast using" : "Cast at";
       levelRow.appendChild(caption);
 
       for (const opt of options) {
         const b = document.createElement("button");
-        const isPact = opt.kind === "pact";
         b.className = `level-chip${chosen === opt.level && chosenKind === opt.kind ? " is-active" : ""}${opt.left <= 0 ? " is-empty" : ""}`;
-        b.textContent = isPact ? `Pact ${opt.level}` : `L${opt.level}`;
-        b.title = `${opt.left} left`;
+        b.textContent =
+          opt.kind === "free" ? `Free ${opt.left}/${sp.limitedUse.max}` :
+          opt.kind === "pact" ? `Pact ${opt.level}` : `L${opt.level}`;
+        b.title =
+          opt.kind === "free"
+            ? `${opt.left} left, back on a ${sp.limitedUse.resetsOn}`
+            : `${opt.left} left`;
         b.onclick = () => {
           chosen = opt.level;
           chosenKind = opt.kind;
@@ -2229,9 +2350,13 @@ const App = (() => {
       if (options.length) {
         const opt = options.find((o) => o.level === chosen && o.kind === chosenKind);
         const cast = button(
+          opt?.kind === "free" ? `Cast (free use)` :
           opt?.kind === "pact" ? `Cast (pact slot)` : `Cast (uses L${chosen} slot)`,
           "btn-ghost",
-          () => castSpell(sp, chosen, chosenKind)
+          async () => {
+            await castSpell(sp, chosen, chosenKind);
+            refresh();
+          }
         );
         cast.disabled = !opt || opt.left <= 0;
         actions.appendChild(cast);
@@ -2245,9 +2370,20 @@ const App = (() => {
     body.append(meta, desc, levelRow, actions);
   }
 
-  /** Spend the slot and say so. Rolling is separate — cast, then roll. */
+  /** Spend the slot or the use and say so. Rolling is separate — cast, then roll. */
   async function castSpell(sp, level, kind) {
     const s = state.sheet;
+
+    if (kind === "free") {
+      const uses = spellUsesUsed(s.play);
+      const used = uses[sp.name] || 0;
+      if (used >= sp.limitedUse.max) return toast(`No free uses of ${sp.name} left.`, true);
+      uses[sp.name] = used + 1;
+
+      savePlay();
+      await announce(`casts ${Rolls.bold(sp.name)} ${Rolls.dim("(free use)")}`);
+      return;
+    }
 
     if (kind === "pact") {
       const pact = s.spellcasting.pact;
@@ -2265,6 +2401,120 @@ const App = (() => {
 
     const at = level > sp.level ? ` at level ${level}` : "";
     await announce(`casts ${Rolls.bold(sp.name)}${at}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Session notes
+  //
+  // Somewhere to write "the innkeeper is lying" down mid-session without leaving
+  // TaleSpire for another window. Notes live in play state, so they belong to the
+  // character, survive a re-import and outlast a rest — and they are never posted
+  // anywhere. This is a scratchpad, not a message.
+  // -------------------------------------------------------------------------
+
+  const notesOf = (play) => (play.notes ||= []);
+
+  function addNote(text) {
+    const body = String(text || "").trim();
+    if (!body) return;
+
+    notesOf(state.sheet.play).unshift({
+      id: `note-${Date.now()}`,
+      at: new Date().toISOString(),
+      text: body,
+    });
+    renderNotes();
+    savePlay();
+  }
+
+  function removeNote(note) {
+    const play = state.sheet.play;
+    play.notes = notesOf(play).filter((n) => n !== note);
+    renderNotes();
+    savePlay();
+  }
+
+  /** Time alone for a note from today, date and time for anything older. */
+  function noteWhen(note) {
+    const at = new Date(note.at);
+    if (Number.isNaN(at.getTime())) return "";
+
+    const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const stamp = at.toDateString() === new Date().toDateString()
+      ? time
+      : `${at.toLocaleDateString()} ${time}`;
+
+    return note.editedAt ? `${stamp} · edited` : stamp;
+  }
+
+  function renderNotes() {
+    const host = $("notes");
+    if (!host) return;
+    host.replaceChildren();
+
+    const notes = state.sheet ? notesOf(state.sheet.play) : [];
+
+    if (!notes.length) {
+      const empty = document.createElement("p");
+      empty.className = "notes-empty";
+      empty.textContent = "Nothing written down yet.";
+      host.appendChild(empty);
+      return;
+    }
+
+    for (const note of notes) {
+      const row = document.createElement("div");
+      row.className = "note";
+
+      const body = document.createElement("div");
+      body.className = "note-body";
+
+      // Edited in place: fixing a name shouldn't mean deleting the note and
+      // typing it again. `plaintext-only` keeps pasted markup out of the store.
+      const text = document.createElement("div");
+      text.className = "note-text";
+      text.contentEditable = "plaintext-only";
+      text.textContent = note.text;
+      text.title = "Click to edit";
+      text.onblur = () => {
+        const next = text.textContent.trim();
+        if (next === note.text) return;
+        if (!next) return removeNote(note); // emptied is deleted
+        note.text = next;
+        note.editedAt = new Date().toISOString();
+        renderNotes();
+        savePlay();
+      };
+
+      const when = document.createElement("div");
+      when.className = "note-when";
+      when.textContent = noteWhen(note);
+
+      body.append(text, when);
+      row.appendChild(body);
+
+      // Two clicks to delete. Everything else on the panel can be re-derived from
+      // the import or given back with ↺; a note that's gone is gone.
+      const remove = document.createElement("button");
+      remove.className = "btn btn-small btn-ghost";
+      remove.textContent = "×";
+      remove.title = "Delete this note";
+      let armed = null;
+      remove.onclick = () => {
+        if (armed) {
+          clearTimeout(armed);
+          return removeNote(note);
+        }
+        remove.textContent = "Delete?";
+        armed = setTimeout(() => {
+          armed = null;
+          remove.textContent = "×";
+        }, 3000);
+      };
+
+      row.appendChild(remove);
+      host.appendChild(row);
+    }
   }
 
   // --- checks --------------------------------------------------------------
@@ -2814,7 +3064,9 @@ const App = (() => {
       results: $("bestiary-results"),
       sheet: $("bestiary-sheet"),
       onRoll: monsterRoll,
+      onAnnounce: monsterAnnounce,
       onShow: refreshEncounterPicker,
+      scratchContext: scratchSpellContext,
       onError: (m) => toast(m, true),
     });
     $("open-bestiary").onclick = showBestiary;
@@ -2890,6 +3142,19 @@ const App = (() => {
         }
       };
     }
+
+    const commitNote = () => {
+      const input = $("note-input");
+      addNote(input.value);
+      input.value = "";
+      input.focus();
+    };
+    $("note-save").onclick = commitNote;
+    $("note-input").onkeydown = (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      commitNote();
+    };
 
     for (const tab of document.querySelectorAll(".tab")) {
       tab.onclick = () => {

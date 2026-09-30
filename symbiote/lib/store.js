@@ -212,17 +212,29 @@ const Store = (() => {
     const hitDiceUsed = {};
     for (const hd of sheet.hp.hitDice) hitDiceUsed[hd.die] = hd.used || 0;
 
+    // Spells that arrive with their own uses — Magic Initiate's one free cast per
+    // long rest — are tracked by name, the way resources are.
+    const spellUsesUsed = {};
+    for (const block of sheet.spellcasting.blocks) {
+      for (const sp of block.spells) {
+        if (sp.limitedUse) spellUsesUsed[sp.name] = sp.limitedUse.used || 0;
+      }
+    }
+
     sheet.play = {
       hp: { current: sheet.hp.current, temp: sheet.hp.temp || 0 },
       slotsUsed,
       pactUsed: sheet.spellcasting.pact?.used || 0,
       resourcesUsed,
       hitDiceUsed,
+      spellUsesUsed,
       effects: [], // buffs from other players' spells; see app.js
       // Equip/attune choices made at the table, keyed by inventory item id.
       // D&D Beyond only knows what was true at export; taking a ring off mid-fight
       // has to change armour class here without a re-import.
       equipment: {},
+      // Written at the table and never sent anywhere; see app.js.
+      notes: [],
       // Seeded from the import, then owned by the table: D&D Beyond only knows
       // what was true when you exported.
       conditions: (sheet.conditions || []).map((c) => ({ name: c.name, level: c.level || null })),

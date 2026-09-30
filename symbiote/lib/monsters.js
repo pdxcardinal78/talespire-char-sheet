@@ -103,6 +103,120 @@ const Monsters = (() => {
     return { kind: damage ? "damage" : "text", damage, flat: flatDamage(action, Boolean(damage)) };
   }
 
+  // --- spellcasting --------------------------------------------------------
+  //
+  // A statblock's spells are prose and nothing else: a paragraph naming the save
+  // DC, then a bulleted list of level headings and comma-separated spell names.
+  // That reads fine and plays badly — the GM has a fireball to throw and has to
+  // go find out what fireball does. So the paragraph is parsed into groups the
+  // panel can cast from, and the original text is kept alongside, because a
+  // parse that quietly loses a clause should still be checkable against what was
+  // printed.
+
+  const SPELLCASTING_RE = /spellcasting/i;
+
+  /**
+   * The heading that starts a list of spells. Four shapes cover the SRD:
+   *
+   *   Cantrips (at will): fire bolt, light        <- unlimited
+   *   1st level (4 slots): detect magic, shield   <- slots, shared across the level
+   *   At will: dancing lights                     <- innate, unlimited
+   *   3/day each: bless, sanctuary                <- innate, counted per spell
+   */
+  const GROUP_RE =
+    /^[*\-\s]*(cantrips?|(\d)(?:st|nd|rd|th)[-\s]level|at[-\s]will|(\d+)\s*\/\s*day(\s+each)?)\b([^:]*):\s*(.+)$/i;
+
+  const SLOTS_RE = /\((\d+)\s*slots?\)/i;
+
+  /**
+   * One spell as the statblock names it.
+   *
+   * The qualifier in "conjure elemental (air elemental only)" is a restriction on
+   * the casting, not part of the name — kept as a note so the spell can still be
+   * found, and still shown so the restriction isn't lost.
+   */
+  function parseSpellName(text) {
+    const raw = String(text).replace(/[_*]/g, "").trim();
+    const note = raw.match(/\(([^)]*)\)\s*$/);
+    return {
+      // Left exactly as printed — lowercase, usually. Naive title case mangles
+      // the short words ("Cone Of Cold"), and the spell list the panel looks the
+      // name up in is the authority on how it's spelled anyway.
+      name: (note ? raw.slice(0, note.index) : raw).trim(),
+      note: note ? note[1].trim() : null,
+    };
+  }
+
+  /**
+   * Pull the castable shape out of a Spellcasting trait.
+   *
+   * Returns null for a trait that names no spells at all — the hag covens' shared
+   * spellcasting rider, for one, which is a paragraph of rules about other hags.
+   */
+  function parseSpellcasting(trait) {
+    const desc = String(trait.desc || "");
+    const groups = [];
+
+    for (const line of desc.split(/\r?\n/)) {
+      const m = GROUP_RE.exec(line.trim());
+      if (!m) continue;
+
+      const [, head, levelDigit, perDay, each, tail, list] = m;
+      const level = levelDigit ? Number(levelDigit) : 0;
+      const slots = SLOTS_RE.exec(tail || "");
+      const atWill = /at[-\s]will/i.test(head) || /at will/i.test(tail || "");
+
+      groups.push({
+        // Stable across renders and saves, so spent slots survive a reload.
+        id: perDay ? `day${perDay}${groups.length}` : atWill && !levelDigit && !/cantrip/i.test(head) ? "atwill" : `l${level}`,
+        label: `${head}${tail || ""}`.trim(),
+        level,
+        // Slots belong to the level and are shared by every spell in it.
+        slots: slots ? Number(slots[1]) : null,
+        // Innate uses belong to each spell separately — "3/day each" is three
+        // castings of every spell on the line, not three between them.
+        usesEach: perDay ? Number(perDay) : null,
+        spells: list.split(/,(?![^(]*\))/).map(parseSpellName).filter((s) => s.name),
+      });
+    }
+
+    // "The mephit can innately cast _sleep_, requiring no material components."
+    // — one spell, stated in the sentence, with its budget in the trait's name.
+    if (!groups.length) {
+      // The spell can be followed by its own save DC in brackets, which is a
+      // rider on the casting and not part of the name.
+      const single = /innately cast\s+_?([a-z' ]+?)_?\s*(?:\(([^)]*)\))?\s*(?:,|\.|$)/i.exec(desc);
+      if (!single) return null;
+      const perDay = /(\d+)\s*\/\s*day/i.exec(trait.name);
+      groups.push({
+        id: "innate",
+        label: perDay ? `${perDay[1]}/day` : "At will",
+        level: 0,
+        slots: null,
+        usesEach: perDay ? Number(perDay[1]) : null,
+        spells: [{ name: single[1].trim(), note: null }],
+      });
+    }
+
+    const saveDc = /spell save DC\s*(\d+)/i.exec(desc);
+    const toHit = /([+-]\s*\d+)\s+to hit with spell attacks/i.exec(desc);
+    const ability = /spellcasting ability is (\w+)/i.exec(desc);
+    const casterLevel = /(\d+)(?:st|nd|rd|th)[-\s]level spellcaster/i.exec(desc);
+
+    return {
+      name: trait.name,
+      // Innate spells cost no slots and are usually counted per day instead.
+      innate: /innate/i.test(trait.name),
+      ability: ability ? title(ability[1]) : null,
+      saveDc: saveDc ? Number(saveDc[1]) : null,
+      toHit: toHit ? Number(toHit[1].replace(/\s+/g, "")) : null,
+      // Cantrips scale on it, so a mage's fire bolt is 2d10 rather than 1d10.
+      casterLevel: casterLevel ? Number(casterLevel[1]) : null,
+      groups,
+      desc,
+    };
+  }
+
   function actionList(list, category) {
     return (list || []).map((a) => ({
       name: a.name,
@@ -157,6 +271,13 @@ const Monsters = (() => {
         conditionImmune: raw.condition_immunities || null,
       },
       traits: actionList(raw.special_abilities, "trait"),
+      // The spellcasting traits, parsed into something castable. The traits stay
+      // in the list above as well: the panel renders the parse in their place and
+      // keeps the printed text one click away.
+      spellcasting: (raw.special_abilities || [])
+        .filter((a) => SPELLCASTING_RE.test(a.name || ""))
+        .map(parseSpellcasting)
+        .filter(Boolean),
       actions: [
         ...actionList(raw.actions, "action"),
         ...actionList(raw.bonus_actions, "bonus action"),
@@ -248,7 +369,7 @@ const Monsters = (() => {
     return found ? normalize(found) : null;
   }
 
-  return { normalize, loadBundled, searchBundled, searchOnline, get, signed };
+  return { normalize, parseSpellcasting, loadBundled, searchBundled, searchOnline, get, signed };
 })();
 
 if (typeof window !== "undefined") window.Monsters = Monsters;
