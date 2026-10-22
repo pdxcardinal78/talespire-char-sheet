@@ -30,9 +30,9 @@ Tested on an M5 Pro MacBook Pro, TaleSpire on Unity 2021.3.45f2, BepInEx
 | Symbiote panel can call `127.0.0.1` | Passes |
 | Plugin sets a mini's HP, and Spirekeeper sees it via `onCreatureStateChange` | Passes |
 | Plugin toggles persistent emotes on a mini | Passes |
-| A client **without** the plugin sees the GM's changes | **Not tested yet** (needs a second client) |
+| A client **without** the plugin sees the GM's changes (HP and emotes) | Passes, verified on a second account |
 
-The last row decides the design: if it passes, only the GM installs the plugin.
+Because changes sync to clients without the plugin, only the GM needs to install it.
 
 ## Apple Silicon workarounds
 
@@ -107,8 +107,7 @@ TaleSpire's game code is `Bouncyrock.TaleSpire.Runtime.dll`, not the usual
 
 Each of these sends a board sync op (`SetCreatureHpOp` and friends), and the
 handler that applies it has no rights check of its own. So a change made on the
-GM's machine should land on every client. That is what the untested row above
-checks.
+GM's machine lands on every client, as the status table confirms.
 
 Initiative is writable too: `InitiativeManager.SyncQueueList` and
 `SetCurrentElement` send `SetLineupOp` and `SetCurrentTurnElementOp`. Not wired
@@ -175,7 +174,7 @@ Remove everything with `./plugin/install-mac.sh --uninstall`.
 | 3 | `curl -s http://127.0.0.1:47817/ping` | the server is up |
 | 4 | Open a board and the **Spirekeeper Bridge Probe** panel; Bridge says *connected* | a panel can reach the plugin |
 | 5 | Select a mini, **Use selected mini**, **−5**: HP drops on the board and the log shows an `event` line | HP write, seen by Spirekeeper |
-| 6 | Repeat 5 with a second client on the board running plain TaleSpire | the change reaches clients without the plugin |
+| 6 | Repeat 5 and 7 with a second client on the board running plain TaleSpire | changes reach clients without the plugin |
 | 7 | Give a mini a persistent emote, `curl -s http://127.0.0.1:47817/selected`, then `/emote` with `on=0` | conditions can be toggled on minis |
 
 ## Troubleshooting
