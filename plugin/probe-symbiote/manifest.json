@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 1,
+  "name": "Spirekeeper Bridge Probe",
+  "version": "0.1.0",
+  "summary": "Test panel for the Spirekeeper bridge plugin. Not for play.",
+  "license": "MIT",
+  "entryPoint": "/index.html",
+  "about": {
+    "authors": ["Ryan Johnson"]
+  },
+  "api": {
+    "version": "0.1",
+    "initTimeout": 10,
+    "subscriptions": {
+      "creatures": {
+        "onCreatureStateChange": "onCreatureStateChange",
+        "onCreatureSelectionChange": "onCreatureSelectionChange"
+      }
+    }
+  },
+  "environment": {
+    "webViewBackgroundColor": "#1b1d22",
+    "extras": ["colorStyles"]
+  },
+  "controls": {
+    "reload": true
+  }
+}
