@@ -47,6 +47,7 @@ const App = (() => {
       await Store.load();
       renderVersion();
       await detectGM();
+      Bridge.probe(); // not awaited: an absent plugin must not slow startup
 
       Party.configure({
         onGrant: onEffectGranted,
@@ -411,12 +412,45 @@ const App = (() => {
   /** Take an offered roll and spend it on the selected combatant. */
   async function applyOfferedDamage(combatant, entry) {
     if (!combatant) return;
-    if (!Encounters.applyDamage(combatant, entry.amount)) {
+    const onBoard = Encounters.hpFor(combatant).source === "board";
+    if (onBoard && !writesBoard(combatant)) {
       return toast("This mini's hit points live on the board — change them there.", true);
     }
+    if (!(await setCombatantHp(combatant, `-${entry.amount}`))) return;
     Encounters.dismissDamage(entry.rollId);
-    await saveCurrentEncounter();
     toast(`${entry.amount} damage to ${combatant.label}.`);
+  }
+
+  /** Can this combatant's HP go straight onto its mini? Needs the bridge and a link. */
+  const writesBoard = (combatant) => Boolean(combatant?.creatureId) && Bridge.canWrite();
+
+  /**
+   * Read what was typed into an HP box: `12` sets, `-5` and `+3` change.
+   * Returns { next } or { error }. Never below zero; a GM may go above max.
+   */
+  function parseHpInput(raw, before) {
+    const text = String(raw ?? "").trim();
+    if (!text) return { empty: true };
+    const relative = /^[+-]/.test(text);
+    const value = Number(text);
+    if (!Number.isFinite(value)) return { error: `“${text}” isn't a number. Try 12, -5 or +3.` };
+    return { next: Math.max(0, Math.round(relative ? (before ?? 0) + value : value)) };
+  }
+
+  /** A GM editing a party mini's HP from the party view, through the bridge. */
+  async function setPartyHp(row, raw) {
+    const parsed = parseHpInput(raw, row.hp);
+    if (parsed.empty) return GM.render();
+    if (parsed.error) {
+      GM.render();
+      return toast(parsed.error, true);
+    }
+    const r = await Bridge.setHp(row.id, parsed.next, row.hpMax);
+    if (!r.ok) {
+      GM.render();
+      return toast(`Couldn't set ${row.name}'s HP on the board (${r.error}).`, true);
+    }
+    // TaleSpire's change event refreshes the row with the board's own value
   }
 
   /**
@@ -427,30 +461,51 @@ const App = (() => {
    * no arithmetic and nothing to aim at but the row in front of them.
    */
   async function setCombatantHp(combatant, raw) {
-    const text = String(raw ?? "").trim();
     const hp = Encounters.hpFor(combatant);
+    const toBoard = writesBoard(combatant);
 
-    if (hp.source === "board") {
+    if (hp.source === "board" && !toBoard) {
       Encounters.render();
-      return toast("This mini's hit points live on the board — change them there.", true);
+      toast("This mini's hit points live on the board — change them there.", true);
+      return false;
     }
 
-    if (!text) return Encounters.render();
-
-    const relative = /^[+-]/.test(text);
-    const value = Number(text);
-    if (!Number.isFinite(value)) {
-      Encounters.render();
-      return toast(`“${text}” isn't a number. Try 12, -5 or +3.`, true);
-    }
-
-    const before = combatant.hp ?? combatant.maxHp ?? 0;
-    const next = relative ? before + value : value;
     // A monster can be brought back above its statblock maximum by a GM who
     // wants that; it just cannot go below zero.
-    combatant.hp = Math.max(0, Math.round(next));
+    const parsed = parseHpInput(raw, hp.value ?? combatant.hp ?? combatant.maxHp ?? 0);
+    if (parsed.empty) {
+      Encounters.render();
+      return false;
+    }
+    if (parsed.error) {
+      Encounters.render();
+      toast(parsed.error, true);
+      return false;
+    }
+    const next = parsed.next;
 
+    if (toBoard) {
+      // The mini may have no hit points yet; give it the statblock's maximum
+      // so the board gets a proper bar, after which the board owns the count
+      const max = hp.max || combatant.maxHp || null;
+      const r = await Bridge.setHp(combatant.creatureId, next, max);
+      if (r.ok) {
+        combatant.hp = next; // kept in step, for when the bridge isn't there
+        Encounters.noteBoardHp(combatant.creatureId, next, max ?? next);
+        await saveCurrentEncounter();
+        return true;
+      }
+      toast(`Couldn't set ${combatant.label}'s HP on the board (${r.error}).`, true);
+      if (hp.source === "board") {
+        Encounters.render();
+        return false;
+      }
+      // Fall through: the panel keeps the count as it did before the bridge
+    }
+
+    combatant.hp = next;
     await saveCurrentEncounter();
+    return true;
   }
 
   async function linkCombatant(combatant) {
@@ -3055,6 +3110,15 @@ const App = (() => {
       container: $("party-list"),
       meta: $("party-meta"),
       onError: (m) => toast(`Could not read the party: ${m}`, true),
+      canWrite: () => Bridge.canWrite(),
+      onSetHp: setPartyHp,
+    });
+
+    // The bridge appearing or going away changes which HP boxes are editable
+    Bridge.onChange((st) => {
+      Encounters.render();
+      GM.render();
+      if (st.available && st.canGm) toast("Bridge connected: HP edits now go onto the minis.");
     });
     $("open-party").onclick = showParty;
     $("close-party").onclick = closeParty;
@@ -3090,6 +3154,7 @@ const App = (() => {
       },
       onOpenMonster: openCombatantStatblock,
       onSetHp: setCombatantHp,
+      canWriteBoard: writesBoard,
       onLink: linkCombatant,
       onRemove: removeCombatant,
       onApplyDamage: applyOfferedDamage,
@@ -3194,7 +3259,20 @@ const App = (() => {
     });
   }
 
-  return { boot, wire, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, state };
+  /**
+   * A mini linked to the open encounter changed on the board, by our own
+   * bridge write or by someone using TaleSpire's radial menu. Events come one
+   * per property, so coalesce into a single re-read.
+   */
+  let encounterBoardTimer = null;
+  function onCreatureEvent(event) {
+    const structural = event?.kind === "creatureAdded" || event?.kind === "creatureRemoved";
+    if (!structural && !Encounters.isWatching(event?.payload?.id)) return;
+    clearTimeout(encounterBoardTimer);
+    encounterBoardTimer = setTimeout(refreshBoardHp, 150);
+  }
+
+  return { boot, wire, onCreatureEvent, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, state };
 })();
 
 // ---------------------------------------------------------------------------
@@ -3213,6 +3291,7 @@ function onStateChangeEvent(event) {
  */
 function onCreatureStateChange(event) {
   GM.onCreatureEvent(event);
+  App.onCreatureEvent(event);
 }
 
 function onCreatureSelectionChange(event) {
@@ -3446,6 +3525,26 @@ document.addEventListener("DOMContentLoaded", () => {
       },
       system: { clipboard: { setText: log("clipboard.setText") } },
     };
+    // A fake bridge plugin. It writes HP into the fixture creatures and fires
+    // the change event, as TaleSpire would after a real write.
+    if (window.devBridge !== false) {
+      Bridge.useTransport(async (method, path, params) => {
+        console.log("[dev] bridge", method, path, params || "");
+        if (path === "/ping") return { ok: true, version: "dev" };
+        if (path === "/whoami") return { ok: true, canGm: true };
+        if (path === "/hp" && method === "POST") {
+          const c = devCreatures[params.id];
+          if (!c) return { ok: false, error: "creature not on this board" };
+          const max = params.max != null ? Number(params.max) : c.hp?.max ?? 0;
+          c.hp = { name: "HP", value: Number(params.value), max };
+          setTimeout(() => onCreatureStateChange({ kind: "hpChanged", payload: { id: params.id } }), 100);
+          return { ok: true };
+        }
+        return { ok: false, error: "no such route" };
+      });
+    } else {
+      Bridge.useTransport(async () => { throw new Error("dev: bridge absent"); });
+    }
     App.boot();
   }
 });

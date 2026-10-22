@@ -7,11 +7,15 @@
  * not one with a count — because they take damage separately and die separately.
  *
  * On hit points there are two possible truths and they have to be ranked. A mini
- * on the board carries its own HP, visible to everyone; the panel cannot write
- * it (no Symbiote can), but a GM sees it live. So: if a linked mini has hit
- * points set in TaleSpire, the board wins and the panel just reports it. If it
- * doesn't — and plenty of GMs never fill them in — the panel keeps the count
- * itself. One number, always, and it says where it came from.
+ * on the board carries its own HP, visible to everyone; a Symbiote cannot write
+ * it, but a GM sees it live. So: if a linked mini has hit points set in
+ * TaleSpire, the board wins. If it doesn't, and plenty of GMs never fill them
+ * in, the panel keeps the count itself. One number, always, and it says where
+ * it came from.
+ *
+ * With the bridge plugin running on the GM's machine (see lib/bridge.js), the
+ * board is writable: edits to a linked combatant go onto the mini, so the
+ * board stays the one truth and every player sees the change.
  */
 
 const Encounters = (() => {
@@ -65,6 +69,20 @@ const Encounters = (() => {
   function removeCombatant(encounter, combatantId) {
     encounter.combatants = encounter.combatants.filter((c) => c.id !== combatantId);
   }
+
+  /**
+   * Record hit points just written through the bridge, so the row shows them
+   * before TaleSpire's change event comes back round.
+   */
+  function noteBoardHp(creatureId, value, max) {
+    if (!creatureId) return;
+    boardHp.set(creatureId, { value, max });
+    render();
+  }
+
+  /** Is this combatant linked to a mini we've been told about? */
+  const isWatching = (creatureId) =>
+    Boolean(creatureId && current?.combatants.some((c) => c.creatureId === creatureId));
 
   /** Which hit points to believe, and why. */
   function hpFor(combatant) {
@@ -290,7 +308,8 @@ const Encounters = (() => {
       ? `<span class="party-hp-track"><span class="party-hp-fill" style="width:${share * 100}%"></span></span>`
       : "";
 
-    if (hp.source === "board") {
+    const writesBoard = Boolean(deps.canWriteBoard?.(c));
+    if (hp.source === "board" && !writesBoard) {
       hpBox.innerHTML = `<span class="party-hp-text">${hp.value ?? "—"}${hp.max ? ` / ${hp.max}` : ""}</span>${track}`;
       hpBox.title = "Hit points read from the mini on the board — change them in TaleSpire";
     } else {
@@ -303,7 +322,9 @@ const Encounters = (() => {
       field.value = hp.value ?? "";
       field.size = 4;
       field.setAttribute("aria-label", `${c.label} hit points`);
-      field.title = "Set hit points, or type -5 / +3 to change them";
+      field.title = writesBoard
+        ? "Set hit points on the mini, or type -5 / +3 to change them"
+        : "Set hit points, or type -5 / +3 to change them";
       field.onkeydown = (ev) => {
         if (ev.key === "Enter") ev.target.blur();
         if (ev.key === "Escape") {
@@ -459,7 +480,7 @@ const Encounters = (() => {
     String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   return {
-    configure, addMonster, removeCombatant, hpFor, applyDamage,
+    configure, addMonster, removeCombatant, hpFor, applyDamage, noteBoardHp, isWatching,
     readBoard, setQueue, turnOrder, renderList, render, setCurrent,
     select, selected, offerDamage, dismissDamage,
     get current() { return current; },

@@ -7,16 +7,18 @@
  * returns full stats on every mini to a GM, where a player sees only their own —
  * so this is a live read-only view of the party.
  *
- * Read-only is not a design choice, it's the API: a Symbiote cannot write hit
- * points, move a mini, or set a condition. What it can do is watch, and
- * `creatures.onCreatureStateChange` fires on every HP change, so the board stays
- * the source of truth and this panel just reflects it.
+ * A Symbiote cannot write hit points, move a mini, or set a condition. What it
+ * can do is watch, and `creatures.onCreatureStateChange` fires on every HP
+ * change, so the board stays the source of truth and this panel reflects it.
+ *
+ * The exception is the bridge plugin (lib/bridge.js): when the GM's TaleSpire
+ * runs it, each row's hit points become an input that writes to the mini.
  */
 
 const GM = (() => {
   const failed = (r) => r && r.cause !== undefined;
 
-  let deps = {};        // { container, onError }
+  let deps = {};        // { container, meta, onError, canWrite, onSetHp }
   let watching = [];    // creature ids we care about
   let rows = [];        // last known info, in display order
   let owners = new Map(); // playerId -> name
@@ -140,6 +142,34 @@ const GM = (() => {
     hp.className = "party-hp";
     if (row.hp == null) {
       hp.innerHTML = `<span class="party-hp-text">HP hidden</span>`;
+    } else if (deps.canWrite?.()) {
+      // Same control as an encounter row: 12 sets, -5 / +3 change
+      const pct = row.hpMax ? Math.max(0, Math.min(100, (row.hp / row.hpMax) * 100)) : 0;
+      const field = document.createElement("input");
+      field.type = "text";
+      field.className = "combatant-hp-input";
+      field.value = row.hp;
+      field.size = 4;
+      field.setAttribute("aria-label", `${row.name} hit points`);
+      field.title = "Set hit points on the mini, or type -5 / +3 to change them";
+      field.onkeydown = (ev) => {
+        if (ev.key === "Enter") ev.target.blur();
+        if (ev.key === "Escape") {
+          ev.target.value = row.hp;
+          ev.target.blur();
+        }
+      };
+      field.onfocus = () => field.select();
+      field.onchange = () => deps.onSetHp?.(row, field.value);
+      const line = document.createElement("div");
+      line.className = "combatant-hp-line";
+      const max = document.createElement("span");
+      max.className = "combatant-hp-max";
+      max.textContent = row.hpMax ? `/ ${row.hpMax}` : "";
+      line.append(field, max);
+      hp.append(line);
+      hp.insertAdjacentHTML("beforeend",
+        `<span class="party-hp-track"><span class="party-hp-fill" style="width:${pct}%"></span></span>`);
     } else {
       const pct = row.hpMax ? Math.max(0, Math.min(100, (row.hp / row.hpMax) * 100)) : 0;
       hp.innerHTML =

@@ -862,20 +862,43 @@ nesting level within a file. It found a third case on its first run — a duplic
 `cantripMultiplier` in `lib/ddb.js`, harmless because the bodies were identical,
 but dead code that had been shipping for a while.
 
+## Writing to the board
+
+`plugin/` holds an optional BepInEx plugin, the bridge, that gives the panel the
+one thing the Symbiote API withholds: writing to minis. Only the GM installs it;
+changes sync to every client through TaleSpire itself, so players keep plain
+TaleSpire. See `plugin/README.md` for install, the Apple Silicon workarounds and
+the security model.
+
+When the panel finds the bridge (it checks on startup, then every 30 seconds
+while it's missing) and the client is a GM:
+
+- **Fights:** a linked combatant's HP box writes to its mini, including when the
+  mini already has hit points, which used to make the row read-only. A mini with
+  no hit points gets the statblock maximum, so the board shows a proper bar.
+  Applying damage rolled on the board goes the same way.
+- **Party:** each row's HP becomes the same box: `12` sets, `-5` / `+3` change.
+- A toast says *Bridge connected* when it's picked up.
+
+If a write fails, the panel says so and, where it was keeping its own count,
+keeps it. Without the bridge nothing changes from before. Browser dev mode fakes
+the plugin; set `window.devBridge = false` before load to see the panel without it.
+
 ## Known gaps
 
 These are deliberate omissions, not bugs to trip over later:
 
-- **No HP write-back to minis.** Symbiotes cannot modify the board. The panel tracks
-  its own character's HP; it never changes anyone else's. Changing that means a
-  BepInEx plugin in C#.
+- **No HP write-back to minis without the bridge.** Symbiotes cannot modify the
+  board. With the optional bridge plugin on the GM's machine, the GM's party and
+  encounter edits do reach the minis (see §Writing to the board). A player's own
+  sheet still tracks its HP in the panel only.
 - **No stopPicking.** Once the picker is on, only the player can dismiss it
   (Esc or right-click). The panel says so but cannot do it for you.
 - **Hit/miss needs a visible AC.** A player's client can only read stats on minis
   they own, so targeting usually reports the name without a verdict. GMs see both.
-- **Monster HP can't be written to minis.** The encounter tracker keeps its own
-  count, or defers to the board when the mini already has hit points. It can
-  never push a number onto a mini.
+- **Monster HP reaches minis only through the bridge.** Without it, the encounter
+  tracker keeps its own count, or defers to the board when the mini already has
+  hit points.
 - **Initiative is roll-and-tell.** The rolled number can't be pushed into TaleSpire's
   turn tracker; the API has no writer for it.
 - **Conditions don't reach the mini.** They're panel-side only, for the same reason —
