@@ -91,7 +91,11 @@ const GM = (() => {
         // TaleSpire statuses the GM has paired with conditions, and any not yet paired
         ...(() => {
           const st = Statuses.on(info);
-          return { conditions: st.conditions, unknownStatuses: st.unknown.length };
+          return {
+            conditions: st.conditions,
+            unknownStatuses: st.unknown.length,
+            unknownNames: st.unknown.map((id) => Statuses.nameOf(id)).filter(Boolean),
+          };
         })(),
         owner: (info.ownerIds || []).map((o) => owners.get(o)).filter(Boolean)[0] || null,
         // Other named stats, so a campaign that tracks e.g. Stress still shows it.
@@ -242,10 +246,20 @@ const GM = (() => {
         }
         conds.appendChild(chip);
       }
-      if (row.unknownStatuses) {
+      // Statuses not paired with a condition yet: by name where the catalog
+      // knows it, otherwise counted
+      for (const n of row.unknownNames) {
         const chip = document.createElement("span");
         chip.className = "condition status-unknown";
-        chip.textContent = row.unknownStatuses === 1 ? "1 unpaired status" : `${row.unknownStatuses} unpaired statuses`;
+        chip.textContent = `${n} (not paired)`;
+        chip.title = "Pair it with a condition in the list below";
+        conds.appendChild(chip);
+      }
+      const unnamed = row.unknownStatuses - row.unknownNames.length;
+      if (unnamed > 0) {
+        const chip = document.createElement("span");
+        chip.className = "condition status-unknown";
+        chip.textContent = unnamed === 1 ? "1 unpaired status" : `${unnamed} unpaired statuses`;
         chip.title = "Pair it with a condition in the list below";
         conds.appendChild(chip);
       }

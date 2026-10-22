@@ -2,15 +2,15 @@
  * TaleSpire statuses as 5e conditions.
  *
  * A status set from a mini's radial menu (Knocked down, a skull, ...) is a
- * persistent emote, and the API only ever reports it as an opaque id. So the
- * GM pairs each status with a condition once per campaign: set the status on
- * any mini, and it shows up in the Party view, named by the minis wearing it,
- * with a condition picker beside it. The pairing then holds for every creature
- * and every player.
+ * persistent emote, and the symbiote API only reports it as an opaque id. The
+ * bridge can read TaleSpire's own emote catalog, which has every status's name,
+ * so with the bridge running the GM's Party view lists every status by name,
+ * with a condition picker and a suggestion where the names match. Without it,
+ * the list falls back to statuses seen on minis, named by the minis wearing them.
  *
- * The GM's panel stores the pairings in campaign storage and broadcasts each
- * one over sync; a player's panel asks for them when it opens and keeps its
- * own copy. Only the GM sets pairings.
+ * Status ids are TaleSpire content ids, the same in every campaign, so the GM
+ * pairs them once and the pairings hold everywhere. They're kept in the global
+ * library and broadcast over sync; a player's panel asks for them when it opens.
  */
 
 const Statuses = (() => {
@@ -33,6 +33,56 @@ const Statuses = (() => {
   }
 
   const conditionFor = (emoteId) => Store.statusMap()[emoteId] || null;
+
+  /** A status's name from TaleSpire's catalog, cached from the last bridge read. */
+  const nameOf = (emoteId) => Store.statusNames()[emoteId] || null;
+
+  /** Read TaleSpire's status catalog through the bridge and cache the names. */
+  async function loadCatalog() {
+    const list = await Bridge.statuses();
+    if (!list) return false;
+    const names = {};
+    for (const st of list) if (st?.id) names[st.id] = st.name || st.id;
+    await Store.setStatusNames(names);
+    onChange();
+    return true;
+  }
+
+  // Status names, lower-cased, that mean a 5e condition. Exact condition names
+  // match on their own; these cover TaleSpire's wording and common synonyms.
+  const ALIASES = {
+    Prone: ["knocked down", "knocked out", "fallen", "prone"],
+    Unconscious: ["asleep", "sleeping", "sleep", "unconscious", "knocked out cold"],
+    Frightened: ["scared", "afraid", "fear", "frightened", "terrified"],
+    Stunned: ["stunned", "dazed"],
+    Restrained: ["restrained", "entangled", "webbed", "tied up"],
+    Poisoned: ["poisoned", "sick", "poison"],
+    Blinded: ["blind", "blinded"],
+    Deafened: ["deaf", "deafened"],
+    Charmed: ["charmed", "love", "hearts"],
+    Paralyzed: ["paralyzed", "paralysed", "frozen", "held"],
+    Petrified: ["petrified", "stone", "turned to stone"],
+    Exhaustion: ["exhausted", "exhaustion", "tired", "fatigued"],
+    Concentrating: ["concentrating", "concentration"],
+    Invisible: ["invisible", "invisibility"],
+    Incapacitated: ["incapacitated"],
+    Grappled: ["grappled", "grabbed"],
+    Hidden: ["hidden", "hiding", "stealth"],
+    Dodging: ["dodging", "dodge"],
+  };
+
+  /** The condition a status name most likely means, or null. */
+  function suggest(statusName) {
+    const n = String(statusName || "").trim().toLowerCase();
+    if (!n) return null;
+    for (const [condition, words] of Object.entries(ALIASES)) {
+      if (n === condition.toLowerCase() || words.includes(n)) return condition;
+    }
+    for (const [condition, words] of Object.entries(ALIASES)) {
+      if (words.some((w) => w.length > 3 && n.includes(w))) return condition;
+    }
+    return null;
+  }
 
   /** The status that stands for a condition, if one is paired with it. */
   function emoteFor(condition) {
@@ -81,17 +131,53 @@ const Statuses = (() => {
     }
   }
 
-  /** Every status seen this session or already paired, for the GM's mapping list. */
+  /**
+   * Every status for the GM's pairing list: TaleSpire's whole catalog when we
+   * have its names, plus anything seen on a mini or already paired. Statuses on
+   * minis right now come first, then the rest by name.
+   */
   function list() {
-    const ids = new Set([...seen.keys(), ...Object.keys(Store.statusMap())]);
-    return [...ids].map((id) => ({
-      emoteId: id,
-      names: [...(seen.get(id) || [])],
-      condition: conditionFor(id),
-    }));
+    const ids = new Set([
+      ...Object.keys(Store.statusNames()),
+      ...seen.keys(),
+      ...Object.keys(Store.statusMap()),
+    ]);
+    const used = new Set(Object.values(Store.statusMap()));
+    return [...ids]
+      .map((id) => {
+        const name = nameOf(id);
+        const suggestion = conditionFor(id) ? null : suggest(name);
+        return {
+          emoteId: id,
+          name,
+          names: [...(seen.get(id) || [])],
+          condition: conditionFor(id),
+          // Don't suggest a condition another status already has
+          suggestion: suggestion && !used.has(suggestion) ? suggestion : null,
+        };
+      })
+      .sort((a, b) =>
+        (b.names.length > 0) - (a.names.length > 0) ||
+        String(a.name || "~").localeCompare(String(b.name || "~")));
   }
 
-  return { configure, observe, on, conditionFor, emoteFor, setMapping, shareAll, list };
+  /** Pair every status that has a suggestion and no pairing yet. Returns how many. */
+  async function acceptSuggestions() {
+    let n = 0;
+    const taken = new Set(Object.values(Store.statusMap()));
+    for (const it of list()) {
+      if (it.condition || !it.suggestion || taken.has(it.suggestion)) continue;
+      taken.add(it.suggestion);
+      await setMapping(it.emoteId, it.suggestion, true);
+      n += 1;
+    }
+    return n;
+  }
+
+  return {
+    configure, observe, on, conditionFor, emoteFor, nameOf, setMapping, shareAll, list,
+    loadCatalog, suggest, acceptSuggestions,
+  };
 })();
 
 if (typeof window !== "undefined") window.Statuses = Statuses;

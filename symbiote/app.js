@@ -139,7 +139,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.15.0";
+  const APP_VERSION = "0.16.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1667,8 +1667,10 @@ const App = (() => {
   }
 
   /**
-   * The GM's list of statuses seen on minis, each with a condition picker.
-   * A status shows up here once it's on any party mini or linked combatant.
+   * The GM's pairing list: every TaleSpire status by name (from the bridge's
+   * catalog), with a condition picker, a note of which minis wear it now, and a
+   * suggestion where the names match. Without the bridge it falls back to the
+   * statuses seen on minis.
    */
   function renderStatusMap() {
     const box = $("status-map");
@@ -1678,20 +1680,50 @@ const App = (() => {
     if (!items.length) {
       const p = document.createElement("p");
       p.className = "hint";
-      p.textContent =
-        "Set a status on a mini from its radial menu and it appears here. Pick its condition once; it then works for every creature and every player.";
+      p.textContent = Bridge.status.available
+        ? "Reading TaleSpire's statuses…"
+        : "With the bridge running this lists every TaleSpire status by name. Without it, set a status on a mini and it appears here.";
       box.appendChild(p);
       return;
     }
+
+    const suggested = items.filter((it) => !it.condition && it.suggestion).length;
+    if (suggested) {
+      const bar = document.createElement("div");
+      bar.className = "status-map-bar";
+      const btn = document.createElement("button");
+      btn.className = "btn btn-small btn-primary";
+      btn.textContent = `Pair ${suggested} suggested`;
+      btn.title = "Pair every status whose name matches a condition";
+      btn.onclick = async () => {
+        const n = await Statuses.acceptSuggestions();
+        toast(`Paired ${n} ${n === 1 ? "status" : "statuses"}.`);
+      };
+      bar.append(btn);
+      box.appendChild(bar);
+    }
+
     for (const it of items) {
       const row = document.createElement("div");
       row.className = "status-map-row";
-      const label = document.createElement("span");
+      const label = document.createElement("div");
       label.className = "status-map-name";
-      label.textContent = it.names.length ? `On ${it.names.join(", ")}` : "Not on any mini right now";
+      const title = document.createElement("span");
+      title.textContent = it.name || (it.names.length ? `Status on ${it.names.join(", ")}` : "Unnamed status");
+      label.appendChild(title);
+      const sub = [
+        it.name && it.names.length ? `on ${it.names.join(", ")}` : null,
+        !it.condition && it.suggestion ? `suggested: ${it.suggestion}` : null,
+      ].filter(Boolean);
+      if (sub.length) {
+        const small = document.createElement("span");
+        small.className = "sub";
+        small.textContent = sub.join(" · ");
+        label.appendChild(small);
+      }
       label.title = `Status ${it.emoteId}`;
       const pick = document.createElement("select");
-      pick.setAttribute("aria-label", "Condition for this status");
+      pick.setAttribute("aria-label", `Condition for ${it.name || "this status"}`);
       const none = document.createElement("option");
       none.value = "";
       none.textContent = "— not a condition";
@@ -3591,6 +3623,7 @@ const App = (() => {
 
     // The bridge appearing or going away changes which HP boxes are editable
     Bridge.onChange((st) => {
+      if (st.available && state.isGM) Statuses.loadCatalog();
       Encounters.render();
       GM.render();
       if (st.available && st.canGm) toast("Bridge connected: HP edits now go onto the minis.");
@@ -4023,6 +4056,16 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log("[dev] bridge", method, path, params || "");
         if (path === "/ping") return { ok: true, version: "dev" };
         if (path === "/whoami") return { ok: true, canGm: true };
+        if (path === "/statuses") {
+          // A stand-in for TaleSpire's emote catalog; e1 and e2 are on Kree
+          return { ok: true, statuses: [
+            { id: "e1", name: "Knocked down", icon: "knocked" },
+            { id: "e2", name: "Poisoned", icon: "poison" },
+            { id: "e3", name: "Bleeding", icon: "blood" },
+            { id: "e4", name: "Asleep", icon: "zzz" },
+            { id: "e5", name: "Burning", icon: "fire" },
+          ] };
+        }
         if (path === "/emote" && method === "POST") {
           const c = devCreatures[params.id];
           if (!c) return { ok: false, error: "creature not on this board" };

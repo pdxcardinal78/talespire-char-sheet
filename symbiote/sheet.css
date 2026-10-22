@@ -1216,5 +1216,8 @@ textarea {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
   padding: 5px 8px; background: var(--bg-2); border-radius: var(--radius);
 }
-.status-map-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-map-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 13px; }
+.status-map-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-map-name .sub { color: var(--fg-dim); font-size: 11px; }
+.status-map-bar { display: flex; justify-content: flex-end; margin-bottom: 2px; }
 .cond-inline { color: var(--danger); }

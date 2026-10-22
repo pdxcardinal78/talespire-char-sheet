@@ -22,11 +22,11 @@ namespace Spirekeeper.Bridge
             Func<Func<string>, string> onMain, out int status)
         {
             status = 200;
-            bool isWrite = path == "/hp" || path == "/stat" || path == "/emote";
+            bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove";
             switch (path)
             {
-                case "/whoami": case "/selected": case "/creature":
-                case "/hp": case "/stat": case "/emote":
+                case "/whoami": case "/selected": case "/creature": case "/statuses":
+                case "/hp": case "/stat": case "/emote": case "/zone": case "/zone-remove":
                     break;
                 default:
                     status = 404;
@@ -56,8 +56,11 @@ namespace Spirekeeper.Bridge
                     case "/whoami": return WhoAmI();
                     case "/selected": return Selected();
                     case "/creature": return Creature(q["id"]);
+                    case "/statuses": return StatusCatalog();
                     case "/hp": return SetHp(q["id"], q["value"], q["max"]);
                     case "/stat": return SetStat(q["id"], q["index"], q["value"], q["max"]);
+                    case "/zone": return KeepZone(q["ruler"], q["name"], q["tint"]);
+                    case "/zone-remove": return RemoveZone(q["id"]);
                     default: return SetEmote(q["id"], q["emote"], q["on"]);
                 }
             });
@@ -103,6 +106,61 @@ namespace Spirekeeper.Bridge
             CreatureManager.SetCreatureStatByIndex(id, new CreatureStat(value, max), -1);
             BridgePlugin.Log.LogInfo($"HP {id}: {before.Value}/{before.Max} -> {value}/{max}");
             return Json.Ok($"\"before\":{Num(before.Value)},\"value\":{Num(value)},\"max\":{Num(max)}");
+        }
+
+        // TaleSpire's statuses: the persistent emotes in its emote catalog, with
+        // the names shown in the radial menu. Their ids come from the game's own
+        // content, so they're the same ids minis report, in every campaign.
+        static string StatusCatalog()
+        {
+            var collection = EmoteManager.GetCollection();
+            if (collection == null) return Json.Err("emote catalog not loaded yet");
+            var sb = new System.Text.StringBuilder("[");
+            bool first = true;
+            foreach (var item in collection.Emotes)
+            {
+                var e = item?.Emote;
+                if (e == null || !e.IsPersistant) continue;
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append("{\"id\":").Append(Json.Str(e.ActionTimelineId.ToString()))
+                  .Append(",\"name\":").Append(Json.Str(string.IsNullOrEmpty(e.DisplayName) ? e.name : e.DisplayName))
+                  .Append(",\"icon\":").Append(Json.Str(e.IconName))
+                  .Append('}');
+            }
+            sb.Append(']');
+            return Json.Ok("\"statuses\":" + sb);
+        }
+
+        // Turn a placed ruler into one of TaleSpire's own area markers, which stay
+        // on the board for everyone. This is the same call TaleSpire's ruler menu
+        // makes, so the shape and handles are exactly what the ruler showed.
+        // Rulers are shared across clients, so a GM can keep a player's ruler.
+        static string KeepZone(string rulerStr, string name, string tintStr)
+        {
+            if (!RulerId.TryParse(rulerStr ?? "", out var rulerId)) return Json.Err("bad ruler id");
+            // RulerManager is internal to TaleSpire, so reach TryGetRuler by reflection
+            var mgr = typeof(Ruler).Assembly.GetType("RulerManager");
+            var tryGet = mgr?.GetMethod("TryGetRuler",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            if (tryGet == null) return Json.Err("TaleSpire's ruler lookup changed; plugin needs updating");
+            var args = new object[] { rulerId, null };
+            var found = (bool)tryGet.Invoke(null, args);
+            var ruler = args[1] as Ruler;
+            if (!found || ruler == null) return Json.Err("ruler not found; it may have been put away");
+            if (!AoeGuid.TryGenerateNew(out var aoeId)) return Json.Err("could not make a zone id");
+            ushort tint = 0;
+            if (!string.IsNullOrEmpty(tintStr)) ushort.TryParse(tintStr, out tint);
+            AoeManager.AddAoe(ruler, string.IsNullOrEmpty(name) ? null : name, new AoeTintIndex(tint), aoeId);
+            BridgePlugin.Log.LogInfo($"Zone {aoeId.Value} '{name}' from ruler {rulerId}");
+            return Json.Ok($"\"id\":{Json.Str(aoeId.Value.ToString())}");
+        }
+
+        static string RemoveZone(string idStr)
+        {
+            if (!NGuid.TryParse(idStr ?? "", out var guid)) return Json.Err("bad zone id");
+            AoeManager.RemoveAoe(new AoeGuid(guid));
+            return Json.Ok();
         }
 
         // One of the campaign's eight named stats, by index 0 to 7. Spirekeeper

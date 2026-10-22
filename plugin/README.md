@@ -129,9 +129,12 @@ includes each mini's `position` and `rotation`, so an area-of-effect helper
 | `GET /whoami` | Whether this client has GM rights |
 | `GET /selected` | The selected mini: id, name, HP, persistent emote ids |
 | `GET /creature?id=` | The same for any mini on the board |
+| `GET /statuses` | TaleSpire's statuses (persistent emotes) by name: `[{ id, name, icon }]`, from `EmoteManager.GetCollection()`. Added in 0.4.0 |
 | `POST /hp?id=&value=&max=` | Set HP; `max` optional. GM only |
 | `POST /stat?id=&index=&value=&max=` | Set one of the campaign's 8 named stats (index 0 to 7), e.g. a Temp HP stat; `max` optional. GM only. Added in 0.3.0 |
 | `POST /emote?id=&emote=&on=0\|1` | Remove or add a persistent emote. GM only |
+| `POST /zone?ruler=&name=` | Keep a placed ruler on the board as one of TaleSpire's area markers (`AoeManager.AddAoe`), returning its `id`. Works on a player's ruler too, since rulers are shared. GM only. Added in 0.4.0 |
+| `POST /zone-remove?id=` | Remove an area marker made by `/zone`. GM only. Added in 0.4.0 |
 
 ## Security (0.2.0)
 

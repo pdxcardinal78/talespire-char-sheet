@@ -132,8 +132,40 @@ const Bridge = (() => {
     }
   }
 
+  /** TaleSpire's statuses by name: [{ id, name, icon }]. A read, so any panel may ask. */
+  async function statuses() {
+    if (!status.available) return null;
+    try {
+      const r = await transport("GET", "/statuses");
+      return r?.ok ? r.statuses || [] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Keep a placed ruler on the board as one of TaleSpire's area markers. Returns { ok, id }. */
+  async function keepZone(rulerId, name) {
+    if (!canWrite()) return { ok: false, error: "bridge unavailable" };
+    try {
+      const r = await transport("POST", "/zone", { ruler: String(rulerId), name: String(name || "").slice(0, 60) });
+      return r?.ok ? { ok: true, id: r.id } : { ok: false, error: r?.error || "refused" };
+    } catch {
+      return { ok: false, error: "bridge unreachable" };
+    }
+  }
+
+  async function removeZone(zoneId) {
+    if (!canWrite()) return { ok: false, error: "bridge unavailable" };
+    try {
+      const r = await transport("POST", "/zone-remove", { id: zoneId });
+      return r?.ok ? { ok: true } : { ok: false, error: r?.error || "refused" };
+    } catch {
+      return { ok: false, error: "bridge unreachable" };
+    }
+  }
+
   return {
-    probe, canWrite, setHp, setStat, setEmote, onChange, useTransport,
+    probe, canWrite, setHp, setStat, setEmote, statuses, keepZone, removeZone, onChange, useTransport,
     get status() { return status; },
   };
 })();

@@ -920,14 +920,20 @@ box is damage and takes temp first; `12` and `+3` never touch temp.
 ## TaleSpire statuses and conditions
 
 TaleSpire's radial-menu statuses (Knocked down and the rest) are persistent
-emotes, and the API reports them only as opaque ids. So the GM pairs each one
-with a condition once per campaign, in the Party view under *TaleSpire statuses
-→ conditions*: set a status on any mini and it appears there, named by the minis
-wearing it, with a condition picker beside it. Pairing a condition with a second
-status moves it over, so each condition has one status.
+emotes, and the symbiote API reports them only as opaque ids. The bridge reads
+TaleSpire's own status catalog, so with it running the Party view lists every
+status by name under *TaleSpire statuses → conditions*, each with a condition
+picker, a note of which minis wear it right now, and a suggestion where the name
+matches a condition (Knocked down → Prone, Asleep → Unconscious). *Pair N
+suggested* takes all the suggestions at once. Without the bridge the list falls
+back to statuses seen on minis, named by the minis wearing them. Pairing a
+condition with a second status moves it over, so each condition has one status.
 
-Pairings are stored in the GM's campaign storage and shared over sync; a
-player's panel asks for them when it opens.
+Status ids are TaleSpire's own content ids, the same in every campaign, so
+pairings live in the global library beside your characters and are set once for
+every campaign. Pairings made in 0.15.0, which kept them per campaign, move
+across on first load. The GM's panel shares them over sync; a player's panel
+asks for them when it opens.
 
 Once a status is paired, it works in both directions:
 
