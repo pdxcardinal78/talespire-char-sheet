@@ -18,7 +18,7 @@
 const GM = (() => {
   const failed = (r) => r && r.cause !== undefined;
 
-  let deps = {};        // { container, meta, onError, canWrite, onSetHp, onSetTemp }
+  let deps = {};        // { container, meta, onError, canWrite, onSetHp, onSetTemp, onCondition, conditionNames, afterRender }
   let watching = [];    // creature ids we care about
   let rows = [];        // last known info, in display order
   let owners = new Map(); // playerId -> name
@@ -88,6 +88,11 @@ const GM = (() => {
         flying: Boolean(info.isFlying),
         hidden: Boolean(info.isExplicitlyHidden),
         emotes: (info.idsOfActivePersistentEmotes || []).length,
+        // TaleSpire statuses the GM has paired with conditions, and any not yet paired
+        ...(() => {
+          const st = Statuses.on(info);
+          return { conditions: st.conditions, unknownStatuses: st.unknown.length };
+        })(),
         owner: (info.ownerIds || []).map((o) => owners.get(o)).filter(Boolean)[0] || null,
         // Other named stats, so a campaign that tracks e.g. Stress still shows it.
         extras: stats
@@ -214,6 +219,57 @@ const GM = (() => {
     if (row.extras.length) ac.title = row.extras.join("\n");
 
     el.append(name, hp, ac);
+
+    // Conditions, from the statuses on the mini
+    const writable = Boolean(deps.canWrite?.());
+    const addable = writable ? (deps.conditionNames?.() || []).filter((n) => !row.conditions.includes(n)) : [];
+    if (row.conditions.length || row.unknownStatuses || addable.length) {
+      const conds = document.createElement("div");
+      conds.className = "party-conds";
+      for (const c of row.conditions) {
+        const chip = document.createElement("span");
+        chip.className = "condition";
+        const label = document.createElement("span");
+        label.textContent = c;
+        chip.appendChild(label);
+        if (writable) {
+          const x = document.createElement("button");
+          x.className = "chip-btn";
+          x.textContent = "×";
+          x.title = `Clear ${c} from the mini`;
+          x.onclick = () => deps.onCondition?.(row, c, false);
+          chip.appendChild(x);
+        }
+        conds.appendChild(chip);
+      }
+      if (row.unknownStatuses) {
+        const chip = document.createElement("span");
+        chip.className = "condition status-unknown";
+        chip.textContent = row.unknownStatuses === 1 ? "1 unpaired status" : `${row.unknownStatuses} unpaired statuses`;
+        chip.title = "Pair it with a condition in the list below";
+        conds.appendChild(chip);
+      }
+      if (addable.length) {
+        const pick = document.createElement("select");
+        pick.className = "party-cond-pick";
+        pick.setAttribute("aria-label", `Add a condition to ${row.name}`);
+        const first = document.createElement("option");
+        first.value = "";
+        first.textContent = "+ Condition";
+        pick.appendChild(first);
+        for (const n of addable) {
+          const opt = document.createElement("option");
+          opt.value = n;
+          opt.textContent = n;
+          pick.appendChild(opt);
+        }
+        pick.onchange = () => {
+          if (pick.value) deps.onCondition?.(row, pick.value, true);
+        };
+        conds.appendChild(pick);
+      }
+      el.appendChild(conds);
+    }
     return el;
   }
 
@@ -249,6 +305,7 @@ const GM = (() => {
     }
 
     for (const row of rows) host.appendChild(rowElement(row));
+    deps.afterRender?.();
   }
 
   const escape = (s) =>

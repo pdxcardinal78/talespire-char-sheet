@@ -163,6 +163,7 @@ const Encounters = (() => {
       if (info?.hp) {
         const v = Vitals.read(info);
         boardHp.set(info.id, {
+          conditions: Statuses.on(info).conditions,
           value: info.hp.value, max: info.hp.max,
           temp: v.tempSource === "stat" ? v.temp : null,
           tempIndex: v.tempIndex, tempMax: v.tempMax,
@@ -316,7 +317,8 @@ const Encounters = (() => {
     const name = el("button", "combatant-name");
     name.innerHTML =
       `<span>${escape(c.label)}</span>` +
-      `<span class="sub">${escape(c.creatureId ? "linked" : "no mini")}${c.ac != null ? ` · AC ${c.ac}` : ""}</span>`;
+      `<span class="sub">${escape(c.creatureId ? "linked" : "no mini")}${c.ac != null ? ` · AC ${c.ac}` : ""}` +
+      `${(boardHp.get(c.creatureId)?.conditions || []).map((n) => ` · <span class="cond-inline">${escape(n)}</span>`).join("")}</span>`;
     name.title = "Select — damage rolled on the board applies here";
     name.onclick = () => select(c.id);
     row.appendChild(name);

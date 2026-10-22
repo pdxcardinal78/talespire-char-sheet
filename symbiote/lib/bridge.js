@@ -119,8 +119,21 @@ const Bridge = (() => {
     }
   }
 
+  /** Add (on) or remove a persistent emote, TaleSpire's mini status, on a mini. */
+  async function setEmote(creatureId, emoteId, on) {
+    if (!canWrite()) return { ok: false, error: "bridge unavailable" };
+    try {
+      const r = await transport("POST", "/emote", { id: creatureId, emote: emoteId, on: on ? "1" : "0" });
+      return r?.ok ? { ok: true } : { ok: false, error: r?.error || "write refused" };
+    } catch {
+      set({ available: false, canGm: false, version: null });
+      retryTimer = setTimeout(probe, RETRY_MS);
+      return { ok: false, error: "bridge unreachable" };
+    }
+  }
+
   return {
-    probe, canWrite, setHp, setStat, onChange, useTransport,
+    probe, canWrite, setHp, setStat, setEmote, onChange, useTransport,
     get status() { return status; },
   };
 })();

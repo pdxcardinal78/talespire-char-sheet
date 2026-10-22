@@ -16,7 +16,7 @@
 
 const Store = (() => {
   const EMPTY_LIBRARY = { version: 1, sheets: {} };
-  const EMPTY_BINDINGS = { version: 1, bindings: {}, statNamesOffered: false, encounters: {} };
+  const EMPTY_BINDINGS = { version: 1, bindings: {}, statNamesOffered: false, encounters: {}, statusMap: {} };
 
   let library = null; // { version, sheets: { [sheetId]: sheet } }
   let bindings = null; // { version, bindings: { [creatureId]: sheetId } }
@@ -150,6 +150,7 @@ const Store = (() => {
     if (!library.sheets) library.sheets = {};
     if (!bindings.bindings) bindings.bindings = {};
     if (!bindings.encounters) bindings.encounters = {};
+    if (!bindings.statusMap) bindings.statusMap = {};
   }
 
   // --- sheet library -------------------------------------------------------
@@ -291,9 +292,25 @@ const Store = (() => {
     await writeBlob("campaign", bindings);
   }
 
+  // --- TaleSpire statuses -> conditions ------------------------------------
+  //
+  // Persistent emote id -> condition name, chosen by the GM once per campaign
+  // and shared with players over sync (see lib/statuses.js).
+
+  const statusMap = () => bindings.statusMap || {};
+
+  async function setStatusMapping(emoteId, condition) {
+    if (!bindings.statusMap) bindings.statusMap = {};
+    if (condition) bindings.statusMap[emoteId] = condition;
+    else delete bindings.statusMap[emoteId];
+    await writeBlob("campaign", bindings);
+  }
+
   return {
     load,
     persist,
+    statusMap,
+    setStatusMapping,
     ensurePlay,
     listSheets,
     getSheet,

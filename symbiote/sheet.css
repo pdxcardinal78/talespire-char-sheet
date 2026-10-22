@@ -1202,3 +1202,19 @@ textarea {
 .hp-temp-note { color: var(--fg-dim); font-size: 11px; white-space: nowrap; }
 .hp-temp-line { align-items: center; }
 .combatant-hp-input.hp-temp-input { width: 32px; font-size: 12px; padding: 0 3px; }
+
+/* ---------- statuses -> conditions ---------- */
+
+.party-conds { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.status-unknown { border-color: var(--border); color: var(--fg-dim); }
+.party-cond-pick, .status-map-row select {
+  background: var(--bg-3); color: var(--fg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 2px 4px; font: inherit; font-size: 12px;
+}
+.status-map { display: flex; flex-direction: column; gap: 4px; }
+.status-map-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  padding: 5px 8px; background: var(--bg-2); border-radius: var(--radius);
+}
+.status-map-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cond-inline { color: var(--danger); }

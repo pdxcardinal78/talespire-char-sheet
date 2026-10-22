@@ -917,6 +917,31 @@ stale board never overwrites a change made a moment ago.
 GM rows get a small temp box under the HP bar, set exactly. Typing `-5` in the HP
 box is damage and takes temp first; `12` and `+3` never touch temp.
 
+## TaleSpire statuses and conditions
+
+TaleSpire's radial-menu statuses (Knocked down and the rest) are persistent
+emotes, and the API reports them only as opaque ids. So the GM pairs each one
+with a condition once per campaign, in the Party view under *TaleSpire statuses
+→ conditions*: set a status on any mini and it appears there, named by the minis
+wearing it, with a condition picker beside it. Pairing a condition with a second
+status moves it over, so each condition has one status.
+
+Pairings are stored in the GM's campaign storage and shared over sync; a
+player's panel asks for them when it opens.
+
+Once a status is paired, it works in both directions:
+
+- **Board → panel.** A player's sheet follows the statuses on its linked mini:
+  set Knocked down from the radial menu and the sheet gains Prone, with its rules
+  text; clear it and Prone goes. The sheet only follows what changed on the
+  board, so conditions added in the panel are never wiped. Party rows show each
+  mini's conditions and how many statuses aren't paired yet, and fight rows show
+  a linked combatant's conditions beside its AC.
+- **Panel → board.** Adding or removing a paired condition puts the status on
+  the mini or takes it off. A GM does it directly through the bridge, from their
+  own sheet or from *+ Condition* and `×` on a party row; a player's panel asks
+  the GM's bridge over sync, so it needs the GM's panel open.
+
 ## The GM's monster attacks
 
 The table rolls and a person calls hit or miss, as before. The exception is the
@@ -951,8 +976,14 @@ These are deliberate omissions, not bugs to trip over later:
   hit points.
 - **Initiative is roll-and-tell.** The rolled number can't be pushed into TaleSpire's
   turn tracker; the API has no writer for it.
-- **Conditions don't reach the mini.** They're panel-side only, for the same reason —
-  and TaleSpire has no condition concept on creatures to write to even if it did.
+- **Only paired conditions reach the mini.** TaleSpire has no condition concept,
+  so a condition shows on the board only through a status the GM has paired with
+  it (see §TaleSpire statuses and conditions), and only with the bridge running
+  on the GM's machine. Unpaired conditions stay in the panel. Exhaustion's level
+  doesn't travel; the status just means "exhausted".
+- **Linking a sheet takes over the mini's HP.** Once a sheet is linked, its HP,
+  maximum and temp pool are written to the mini (with the bridge), replacing
+  whatever the mini had.
 - **One character sheet, 5e only.** Pathbuilder and Demiplane would each be a new
   adapter feeding the same normalized shape.
 - **Feature-granted spells are filled from the SRD, not from D&D Beyond.** The

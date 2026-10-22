@@ -56,7 +56,26 @@ const App = (() => {
         onVitals: onVitalsFromPlayer,
         onTemp: onTempFromGm,
         onHit: onHitFromGm,
+        onStatusMapping: ({ emoteId, condition }) => {
+          Statuses.setMapping(emoteId, condition, false).then(() => followLinkedMini());
+        },
+        onStatusRequest: () => {
+          if (state.isGM) Statuses.shareAll();
+        },
+        onCondition: onConditionFromPlayer,
       });
+      Statuses.configure({
+        changed: () => {
+          if (state.isGM) {
+            GM.refresh();
+            refreshBoardHp();
+            renderStatusMap();
+          }
+          followLinkedMini();
+        },
+      });
+      // A player's panel gets the GM's status pairings when it opens
+      if (!state.isGM) Party.requestStatusMappings().catch(() => {});
       renderLibrary();
 
       // Reopen whatever was open last, if it still exists.
@@ -120,7 +139,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.14.0";
+  const APP_VERSION = "0.15.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1563,27 +1582,53 @@ const App = (() => {
     } catch {
       return;
     }
-    if (!info?.hp || !(info.hp.max > 0)) return;
+    if (!info) return;
+    const hasHp = Boolean(info.hp && info.hp.max > 0);
     const tempStat = Vitals.tempStatOf(info);
-    const seen = { hp: info.hp.value, temp: tempStat ? tempStat.value : null };
+    const seen = {
+      hp: hasHp ? info.hp.value : null,
+      temp: tempStat ? tempStat.value : null,
+      conditions: Statuses.on(info).conditions,
+    };
     const before = lastBoardVitals;
     lastBoardVitals = seen;
-    if (!before) return; // first look: nothing has moved yet
 
     const play = s.play;
-    let changed = false;
-    if (seen.hp !== before.hp && seen.hp !== play.hp.current) {
-      play.hp.current = Math.max(0, Math.min(effectiveMaxHp(s), seen.hp));
-      changed = true;
+    const notes = [];
+
+    // Conditions: the statuses the GM has paired. On the first look only add
+    // what the board shows; after that, follow what changed on the board.
+    const has = (name) => play.conditions.some((c) => c.name === name);
+    const added = seen.conditions.filter((c) => !before || !before.conditions.includes(c));
+    const removed = before ? before.conditions.filter((c) => !seen.conditions.includes(c)) : [];
+    for (const name of added) {
+      if (has(name)) continue;
+      play.conditions.push({ name, level: name === "Exhaustion" ? 1 : null });
+      notes.push(`now ${name}`);
     }
-    if (tempStat && seen.temp !== before.temp && seen.temp !== play.hp.temp) {
-      play.hp.temp = Math.max(0, seen.temp || 0);
-      changed = true;
+    for (const name of removed) {
+      if (!has(name)) continue;
+      play.conditions = play.conditions.filter((c) => c.name !== name);
+      notes.push(`no longer ${name}`);
     }
-    if (changed) {
+
+    // Hit points: only once the board has moved, never on the first look
+    if (before && hasHp) {
+      if (seen.hp !== before.hp && seen.hp !== play.hp.current) {
+        play.hp.current = Math.max(0, Math.min(effectiveMaxHp(s), seen.hp));
+        notes.push(`HP ${play.hp.current}/${effectiveMaxHp(s)}`);
+      }
+      if (tempStat && seen.temp !== before.temp && seen.temp !== play.hp.temp) {
+        play.hp.temp = Math.max(0, seen.temp || 0);
+        notes.push(`${play.hp.temp} temp HP`);
+      }
+    }
+
+    if (notes.length) {
       renderHp(s);
+      renderConditions();
       savePlay();
-      toast(`HP updated from the board: ${play.hp.current}/${effectiveMaxHp(s)}${play.hp.temp ? ` +${play.hp.temp} temp` : ""}.`);
+      toast(`From the board: ${notes.join(", ")}.`);
     }
   }
 
@@ -1604,6 +1649,64 @@ const App = (() => {
     applyHp(-n);
     const absorbed = Math.min(tempBefore, n);
     toast(`${source || "The GM"} hits you for ${n}${absorbed ? ` (${absorbed} from temp HP)` : ""}.`);
+  }
+
+  /** A player added or removed a paired condition; as GM, set the status on their mini. */
+  async function onConditionFromPlayer({ creatureId, emoteId, on }) {
+    if (!state.isGM || !Bridge.canWrite() || !creatureId || !emoteId) return;
+    const r = await Bridge.setEmote(creatureId, emoteId, on);
+    if (!r.ok) console.warn("[Spirekeeper] could not set a player's status", r.error);
+  }
+
+  /** The GM adding or removing a condition from a party row. */
+  async function setPartyCondition(row, condition, on) {
+    const emoteId = Statuses.emoteFor(condition);
+    if (!emoteId) return toast(`${condition} isn't paired with a TaleSpire status yet.`, true);
+    const r = await Bridge.setEmote(row.id, emoteId, on);
+    if (!r.ok) return toast(`Couldn't ${on ? "set" : "clear"} ${condition} on ${row.name} (${r.error}).`, true);
+  }
+
+  /**
+   * The GM's list of statuses seen on minis, each with a condition picker.
+   * A status shows up here once it's on any party mini or linked combatant.
+   */
+  function renderStatusMap() {
+    const box = $("status-map");
+    if (!box) return;
+    box.replaceChildren();
+    const items = Statuses.list();
+    if (!items.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent =
+        "Set a status on a mini from its radial menu and it appears here. Pick its condition once; it then works for every creature and every player.";
+      box.appendChild(p);
+      return;
+    }
+    for (const it of items) {
+      const row = document.createElement("div");
+      row.className = "status-map-row";
+      const label = document.createElement("span");
+      label.className = "status-map-name";
+      label.textContent = it.names.length ? `On ${it.names.join(", ")}` : "Not on any mini right now";
+      label.title = `Status ${it.emoteId}`;
+      const pick = document.createElement("select");
+      pick.setAttribute("aria-label", "Condition for this status");
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "— not a condition";
+      pick.appendChild(none);
+      for (const name of CONDITION_NAMES) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        pick.appendChild(opt);
+      }
+      pick.value = it.condition || "";
+      pick.onchange = () => Statuses.setMapping(it.emoteId, pick.value || null, true);
+      row.append(label, pick);
+      box.appendChild(row);
+    }
   }
 
   /** A player's panel reported its vitals; as GM, keep the mini in step. */
@@ -1940,6 +2043,7 @@ const App = (() => {
         play.conditions = play.conditions.filter((x) => x !== c);
         renderConditions();
         savePlay();
+        pushConditionToBoard(c.name, false);
         await announce(`is no longer ${Rolls.bold(c.name)}`);
       };
 
@@ -2011,7 +2115,26 @@ const App = (() => {
     play.conditions.push({ name, level: name === "Exhaustion" ? 1 : null });
     renderConditions();
     savePlay();
+    pushConditionToBoard(name, true);
     await announce(`is ${Rolls.bold(name)}`);
+  }
+
+  /**
+   * Put a condition's paired TaleSpire status on this character's mini, or
+   * take it off. Only conditions the GM has paired with a status can reach the
+   * board; the rest stay in the panel as before. A player's panel can't write
+   * to the board, so it asks the GM's bridge over sync.
+   */
+  function pushConditionToBoard(name, on) {
+    const emoteId = Statuses.emoteFor(name);
+    if (!emoteId || !state.creatureId) return;
+    if (Bridge.canWrite()) {
+      Bridge.setEmote(state.creatureId, emoteId, on).then((r) => {
+        if (!r.ok) toast(`Couldn't ${on ? "set" : "clear"} ${name} on the mini (${r.error}).`, true);
+      });
+    } else {
+      Party.condition(state.creatureId, emoteId, on).catch(() => {});
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -3461,6 +3584,9 @@ const App = (() => {
       canWrite: () => Bridge.canWrite(),
       onSetHp: setPartyHp,
       onSetTemp: setPartyTemp,
+      onCondition: setPartyCondition,
+      conditionNames: () => CONDITION_NAMES.filter((n) => Statuses.emoteFor(n)),
+      afterRender: () => renderStatusMap(),
     });
 
     // The bridge appearing or going away changes which HP boxes are editable
@@ -3897,6 +4023,15 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log("[dev] bridge", method, path, params || "");
         if (path === "/ping") return { ok: true, version: "dev" };
         if (path === "/whoami") return { ok: true, canGm: true };
+        if (path === "/emote" && method === "POST") {
+          const c = devCreatures[params.id];
+          if (!c) return { ok: false, error: "creature not on this board" };
+          const ids = new Set(c.idsOfActivePersistentEmotes || []);
+          if (params.on === "0") ids.delete(params.emote); else ids.add(params.emote);
+          c.idsOfActivePersistentEmotes = [...ids];
+          setTimeout(() => onCreatureStateChange({ kind: "emotesChanged", payload: { id: params.id } }), 100);
+          return { ok: true };
+        }
         if (path === "/stat" && method === "POST") {
           const c = devCreatures[params.id];
           const i = Number(params.index);

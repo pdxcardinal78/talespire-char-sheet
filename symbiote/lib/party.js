@@ -26,7 +26,7 @@ const Party = (() => {
 
   let handlers = {};
 
-  /** @param {{onGrant, onRevoke, onAck, onVitals, onTemp, onHit}} h */
+  /** @param {{onGrant, onRevoke, onAck, onVitals, onTemp, onHit, onStatusMapping, onStatusRequest, onCondition}} h */
   function configure(h) {
     handlers = h;
   }
@@ -102,6 +102,23 @@ const Party = (() => {
     await broadcast({ t: "hit", c: creatureId, a: amount, n: String(source || "").slice(0, 60) });
   }
 
+  // --- statuses and conditions ---------------------------------------------
+
+  /** The GM sharing one status -> condition pairing (condition null clears it). */
+  async function statusMapping(emoteId, condition) {
+    await broadcast({ t: "sm", e: emoteId, c: condition });
+  }
+
+  /** A panel that just opened asking the GM for every pairing. */
+  async function requestStatusMappings() {
+    await broadcast({ t: "smq" });
+  }
+
+  /** A player adding or removing a condition: the GM's bridge sets the status on their mini. */
+  async function condition(creatureId, emoteId, on) {
+    await broadcast({ t: "cnd", c: creatureId, e: emoteId, on: on ? 1 : 0 });
+  }
+
   /**
    * Route an inbound message. `mePlayerId` is how a panel decides a broadcast is
    * addressed to it.
@@ -137,6 +154,12 @@ const Party = (() => {
       handlers.onTemp({ creatureId: msg.c, temp: msg.tp });
     } else if (msg.t === "hit" && handlers.onHit) {
       handlers.onHit({ creatureId: msg.c, amount: msg.a, source: msg.n });
+    } else if (msg.t === "sm" && handlers.onStatusMapping) {
+      handlers.onStatusMapping({ emoteId: msg.e, condition: msg.c || null });
+    } else if (msg.t === "smq" && handlers.onStatusRequest) {
+      handlers.onStatusRequest();
+    } else if (msg.t === "cnd" && handlers.onCondition) {
+      handlers.onCondition({ creatureId: msg.c, emoteId: msg.e, on: Boolean(msg.on) });
     }
   }
 
@@ -164,7 +187,10 @@ const Party = (() => {
     }));
   }
 
-  return { configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, receive, reachablePlayers, MAX_MESSAGE };
+  return {
+    configure, grant, revoke, acknowledge, reportVitals, setTemp, hit,
+    statusMapping, requestStatusMappings, condition, receive, reachablePlayers, MAX_MESSAGE,
+  };
 })();
 
 if (typeof window !== "undefined") window.Party = Party;
