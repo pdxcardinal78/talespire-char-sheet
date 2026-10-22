@@ -64,6 +64,12 @@ const Bridge = (() => {
       if (!ping?.ok) throw new Error(ping?.error || "no answer");
       const who = await transport("GET", "/whoami");
       set({ available: true, canGm: Boolean(who?.ok && who.canGm), version: ping.version || null });
+      // Refused rather than answered (for example, asked before TaleSpire's
+      // panel server was up): ask again later instead of giving up for good
+      if (!who?.ok) {
+        console.warn("[Spirekeeper] bridge refused /whoami:", who?.error);
+        retryTimer = setTimeout(probe, RETRY_MS);
+      }
     } catch {
       set({ available: false, canGm: false, version: null });
       retryTimer = setTimeout(probe, RETRY_MS);

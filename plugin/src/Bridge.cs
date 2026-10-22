@@ -28,7 +28,7 @@ namespace Spirekeeper.Bridge
     {
         public const string Guid = "net.spirekeeper.bridge";
         public const string Name = "Spirekeeper Bridge";
-        public const string Version = "0.3.0";
+        public const string Version = "0.3.1";
         public const int Port = 47817;
 
         internal static ManualLogSource Log;
@@ -225,20 +225,34 @@ namespace Spirekeeper.Bridge
         // TaleSpire serves every symbiote panel from its own HttpListener on
         // http://localhost:<random port>/symbiotes/. The port changes each
         // launch, so read it from WebViewEnvironment once it exists.
+        //
+        // TaleSpire switches that environment's GameObject inactive, and
+        // FindObjectOfType skips inactive objects (0.3.0 found nothing and
+        // refused every panel). FindObjectsOfTypeAll includes them, and also
+        // prefab assets, whose prefix is never set, so take the first that has one.
         static string SymbioteOrigin()
         {
             if (_symbioteOrigin != null) return _symbioteOrigin;
             var found = OnMainThread(() =>
             {
-                var env = UnityEngine.Object.FindObjectOfType<Symbiotes.WebView.WebViewEnvironment>();
-                if (env == null) return null;
                 var field = typeof(Symbiotes.WebView.WebViewEnvironment).GetField("_localSymbioteAddressPrefix",
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                var prefix = field?.GetValue(env) as string;
-                if (string.IsNullOrEmpty(prefix)) return null;
-                var uri = new Uri(prefix);
-                return $"{uri.Scheme}://{uri.Authority}";
+                if (field == null) return "!no _localSymbioteAddressPrefix field; TaleSpire changed";
+                var all = Resources.FindObjectsOfTypeAll<Symbiotes.WebView.WebViewEnvironment>();
+                foreach (var env in all)
+                {
+                    var prefix = field.GetValue(env) as string;
+                    if (string.IsNullOrEmpty(prefix)) continue;
+                    var uri = new Uri(prefix);
+                    return $"{uri.Scheme}://{uri.Authority}";
+                }
+                return $"!{all.Length} WebViewEnvironment object(s), none with a server address yet";
             });
+            if (found != null && found.StartsWith("!"))
+            {
+                BridgePlugin.Log.LogWarning("Symbiote origin not found: " + found.Substring(1));
+                return null;
+            }
             if (found != null && !found.StartsWith("{"))
             {
                 _symbioteOrigin = found;
