@@ -26,7 +26,7 @@ const Party = (() => {
 
   let handlers = {};
 
-  /** @param {{onGrant, onRevoke, onAck}} h */
+  /** @param {{onGrant, onRevoke, onAck, onVitals, onTemp, onHit}} h */
   function configure(h) {
     handlers = h;
   }
@@ -81,6 +81,27 @@ const Party = (() => {
     await broadcast({ t: "ack", id: effectId, to: [granterPlayerId], pid: playerId, ok: accepted ? 1 : 0 });
   }
 
+  // --- hit points ----------------------------------------------------------
+  //
+  // These are addressed by mini, not by player: every panel hears them and the
+  // one linked to that mini acts. Numbers are rounded; the 500-character cap is
+  // nowhere near.
+
+  /** A player's panel telling the GM its mini's HP, max and temp pool. */
+  async function reportVitals(creatureId, hp, max, temp) {
+    await broadcast({ t: "vit", c: creatureId, h: hp, m: max, tp: temp });
+  }
+
+  /** The GM telling a player's panel its new temp pool (no Temp HP stat in this campaign). */
+  async function setTemp(creatureId, temp) {
+    await broadcast({ t: "tmp", c: creatureId, tp: temp });
+  }
+
+  /** The GM telling a player's panel it took damage, when there's no bridge to write the mini. */
+  async function hit(creatureId, amount, source) {
+    await broadcast({ t: "hit", c: creatureId, a: amount, n: String(source || "").slice(0, 60) });
+  }
+
   /**
    * Route an inbound message. `mePlayerId` is how a panel decides a broadcast is
    * addressed to it.
@@ -110,6 +131,12 @@ const Party = (() => {
       handlers.onRevoke(msg.id);
     } else if (msg.t === "ack" && handlers.onAck) {
       handlers.onAck({ effectId: msg.id, playerId: msg.pid, accepted: Boolean(msg.ok) });
+    } else if (msg.t === "vit" && handlers.onVitals) {
+      handlers.onVitals({ creatureId: msg.c, hp: msg.h, max: msg.m, temp: msg.tp });
+    } else if (msg.t === "tmp" && handlers.onTemp) {
+      handlers.onTemp({ creatureId: msg.c, temp: msg.tp });
+    } else if (msg.t === "hit" && handlers.onHit) {
+      handlers.onHit({ creatureId: msg.c, amount: msg.a, source: msg.n });
     }
   }
 
@@ -137,7 +164,7 @@ const Party = (() => {
     }));
   }
 
-  return { configure, grant, revoke, acknowledge, receive, reachablePlayers, MAX_MESSAGE };
+  return { configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, receive, reachablePlayers, MAX_MESSAGE };
 })();
 
 if (typeof window !== "undefined") window.Party = Party;

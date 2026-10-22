@@ -53,6 +53,9 @@ const App = (() => {
         onGrant: onEffectGranted,
         onRevoke: onEffectRevoked,
         onAck: onEffectAck,
+        onVitals: onVitalsFromPlayer,
+        onTemp: onTempFromGm,
+        onHit: onHitFromGm,
       });
       renderLibrary();
 
@@ -117,7 +120,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.13.0";
+  const APP_VERSION = "0.14.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -437,8 +440,43 @@ const App = (() => {
     return { next: Math.max(0, Math.round(relative ? (before ?? 0) + value : value)) };
   }
 
+  /** Is this text damage (`-5`)? Damage takes temp HP before HP. */
+  const damageAmount = (raw) => {
+    const m = /^\s*-\s*(\d+)\s*$/.exec(String(raw ?? ""));
+    return m ? parseInt(m[1], 10) : null;
+  };
+
+  /** The party row as Vitals.write expects it. */
+  const rowVitals = (row) => ({
+    id: row.id, hp: row.hp, max: row.hpMax,
+    temp: row.temp, tempIndex: row.tempIndex, tempMax: row.tempMax,
+  });
+
+  /**
+   * Write HP and temp to a mini through the bridge as GM, and tell the
+   * player's panel the new temp pool when the campaign has no Temp HP stat.
+   */
+  async function writeVitals(v, next, label) {
+    const r = await Vitals.write(v, next);
+    if (!r.ok) {
+      toast(`Couldn't update ${label} on the board (${r.error}).`, true);
+      return false;
+    }
+    if (r.syncTemp != null) {
+      Vitals.report(v.id, { hp: next.hp ?? v.hp, max: next.max ?? v.max, temp: r.syncTemp });
+      await Party.setTemp(v.id, r.syncTemp).catch(() => {});
+    }
+    return true;
+  }
+
   /** A GM editing a party mini's HP from the party view, through the bridge. */
   async function setPartyHp(row, raw) {
+    const dmg = damageAmount(raw);
+    if (dmg != null && row.temp > 0) {
+      const next = Vitals.takeDamage({ hp: row.hp, temp: row.temp }, dmg);
+      if (!(await writeVitals(rowVitals(row), { hp: next.hp, temp: next.temp }, row.name))) return GM.render();
+      return;
+    }
     const parsed = parseHpInput(raw, row.hp);
     if (parsed.empty) return GM.render();
     if (parsed.error) {
@@ -451,6 +489,19 @@ const App = (() => {
       return toast(`Couldn't set ${row.name}'s HP on the board (${r.error}).`, true);
     }
     // TaleSpire's change event refreshes the row with the board's own value
+  }
+
+  /** Set a party mini's temp pool exactly (the GM's call, so no "larger wins" rule). */
+  async function setPartyTemp(row, raw) {
+    const n = Number(String(raw ?? "").trim() || "0");
+    if (!Number.isFinite(n) || n < 0) {
+      GM.render();
+      return toast("Temp HP must be 0 or more.", true);
+    }
+    await writeVitals(rowVitals(row), { temp: Math.round(n) }, row.name);
+    // Re-read: a temp pool without a stat changes nothing on the board, so no
+    // change event will come round to refresh the row
+    GM.refresh();
   }
 
   /**
@@ -482,16 +533,30 @@ const App = (() => {
       toast(parsed.error, true);
       return false;
     }
-    const next = parsed.next;
+    let next = parsed.next;
+    // Damage (-5) comes off temp HP first; setting a value (12) or healing (+3)
+    // never touches it
+    let nextTemp = hp.temp || 0;
+    const dmg = damageAmount(raw);
+    if (dmg != null) {
+      const after = Vitals.takeDamage({ hp: hp.value ?? combatant.hp ?? combatant.maxHp ?? 0, temp: hp.temp }, dmg);
+      next = after.hp;
+      nextTemp = after.temp;
+    }
 
     if (toBoard) {
       // The mini may have no hit points yet; give it the statblock's maximum
       // so the board gets a proper bar, after which the board owns the count
       const max = hp.max || combatant.maxHp || null;
-      const r = await Bridge.setHp(combatant.creatureId, next, max);
+      const v = {
+        id: combatant.creatureId, hp: hp.value, max: hp.max,
+        temp: hp.temp, tempIndex: hp.tempIndex, tempMax: hp.tempMax,
+      };
+      const r = await Vitals.write(v, { hp: next, max, temp: nextTemp });
       if (r.ok) {
         combatant.hp = next; // kept in step, for when the bridge isn't there
-        Encounters.noteBoardHp(combatant.creatureId, next, max ?? next);
+        if (hp.tempIndex == null) combatant.temp = nextTemp;
+        Encounters.noteBoardHp(combatant.creatureId, next, max ?? next, hp.tempIndex != null ? nextTemp : null);
         await saveCurrentEncounter();
         return true;
       }
@@ -504,8 +569,31 @@ const App = (() => {
     }
 
     combatant.hp = next;
+    combatant.temp = nextTemp;
     await saveCurrentEncounter();
     return true;
+  }
+
+  /** Set a combatant's temp pool exactly: on its mini's Temp HP stat if there is one. */
+  async function setCombatantTemp(combatant, raw) {
+    const n = Number(String(raw ?? "").trim() || "0");
+    if (!Number.isFinite(n) || n < 0) {
+      Encounters.render();
+      return toast("Temp HP must be 0 or more.", true);
+    }
+    const temp = Math.round(n);
+    const hp = Encounters.hpFor(combatant);
+    if (hp.tempIndex != null && writesBoard(combatant)) {
+      const r = await Bridge.setStat(combatant.creatureId, hp.tempIndex, temp, Math.max(temp, hp.tempMax || 0));
+      if (!r.ok) {
+        Encounters.render();
+        return toast(`Couldn't set ${combatant.label}'s temp HP on the board (${r.error}).`, true);
+      }
+      Encounters.noteBoardHp(combatant.creatureId, hp.value, hp.max, temp);
+      return;
+    }
+    combatant.temp = temp;
+    await saveCurrentEncounter();
   }
 
   async function linkCombatant(combatant) {
@@ -625,7 +713,12 @@ const App = (() => {
         damage: spec.damage,
         damageName: spec.damageName,
         mode: modeFromEvent(ev),
-        context: { kind: spec.kind, creatureId: state.speaker?.id || null, target: state.target },
+        // monster + damageExpr let a GM's attack against a target with a known
+        // AC resolve itself; see resolveMonsterAttack
+        context: {
+          kind: spec.kind, creatureId: state.speaker?.id || null, target: state.target,
+          monster: true, damageExpr: spec.damage || null, source: spec.name,
+        },
       });
       renderStaged();
     } catch (e) {
@@ -712,6 +805,7 @@ const App = (() => {
     state.sheetId = id;
     state.pending = [];
     state.creatureId = Store.boundCreatureIds(id)[0] || null;
+    lastBoardVitals = null;
     localStorage.setItem("sheetbridge:last", id);
 
     $("import-view").classList.add("hidden");
@@ -1357,16 +1451,177 @@ const App = (() => {
     }
   }
 
+  /**
+   * Maximum HP after changes like Aid (+5) or Life Drain (-7). The imported
+   * maximum is left alone; the changes sit beside it and all end on a long rest.
+   */
+  function effectiveMaxHp(s) {
+    const mods = s.play?.maxHpMods || [];
+    return Math.max(1, s.hp.max + mods.reduce((t, m) => t + (m.amount || 0), 0));
+  }
+
   function renderHp(s) {
     const play = s.play;
+    const max = effectiveMaxHp(s);
+    const mods = play.maxHpMods || [];
     const temp = play.hp.temp ? ` +${play.hp.temp}` : "";
-    $("v-hp").textContent = `${play.hp.current}/${s.hp.max}${temp}`;
+    $("v-hp").textContent = `${play.hp.current}/${max}${mods.length ? "*" : ""}${temp}`;
     $("v-hp").title = [
       play.hp.temp ? `${play.hp.current} HP plus ${play.hp.temp} temporary` : "",
+      mods.length
+        ? `Maximum ${max}: ${s.hp.max} ${mods.map((m) => `${DDB.signed(m.amount)} ${m.name}`).join(" ")}`
+        : "",
       breakdownText(s.hp.breakdown),
     ]
       .filter(Boolean)
       .join("\n\n");
+    renderMaxHpMods(s);
+  }
+
+  function renderMaxHpMods(s) {
+    const box = $("maxhp-mods");
+    if (!box) return;
+    box.replaceChildren();
+    for (const m of s.play.maxHpMods || []) {
+      const chip = document.createElement("span");
+      chip.className = `maxhp-mod${m.amount < 0 ? " is-down" : ""}`;
+      chip.title = "Ends on a long rest";
+      const label = document.createElement("span");
+      label.textContent = `${m.name} ${DDB.signed(m.amount)} max`;
+      const x = document.createElement("button");
+      x.className = "chip-btn";
+      x.textContent = "×";
+      x.title = "End this change now";
+      x.onclick = () => removeMaxHpMod(m.id);
+      chip.append(label, x);
+      box.appendChild(chip);
+    }
+  }
+
+  /**
+   * Raise or lower maximum HP. A raise like Aid lifts current HP by the same
+   * amount; a drop like Life Drain only pulls current HP down if it's now over
+   * the new maximum.
+   */
+  function addMaxHpMod(amount, name) {
+    if (!amount) return;
+    const s = state.sheet;
+    const play = s.play;
+    play.maxHpMods = play.maxHpMods || [];
+    const label = String(name || "").trim() || (amount > 0 ? "Bonus" : "Drain");
+    play.maxHpMods.push({ id: `m-${Date.now().toString(36)}`, name: label, amount });
+    if (amount > 0) play.hp.current += amount;
+    play.hp.current = Math.max(0, Math.min(effectiveMaxHp(s), play.hp.current));
+    renderHp(s);
+    savePlay();
+    reportVitals();
+    announce(`max HP ${DDB.signed(amount)} (${label}): now ${play.hp.current}/${effectiveMaxHp(s)}`).catch(() => {});
+  }
+
+  /** Ending a change: when Aid ends the maximum drops, and current HP with it only if above. */
+  function removeMaxHpMod(id) {
+    const s = state.sheet;
+    const play = s.play;
+    play.maxHpMods = (play.maxHpMods || []).filter((m) => m.id !== id);
+    play.hp.current = Math.min(effectiveMaxHp(s), play.hp.current);
+    renderHp(s);
+    savePlay();
+    reportVitals();
+  }
+
+  /**
+   * Tell the GM's panel this character's HP, maximum and temp pool. With the
+   * bridge the GM writes them onto the mini; without it, the GM's automated
+   * monster attacks still know about temp HP. Debounced: one report per burst.
+   */
+  let vitalsTimer = null;
+  function reportVitals() {
+    if (!state.sheet || !state.creatureId) return;
+    clearTimeout(vitalsTimer);
+    const creatureId = state.creatureId;
+    vitalsTimer = setTimeout(() => {
+      const s = state.sheet;
+      if (!s || state.creatureId !== creatureId) return;
+      Party.reportVitals(creatureId, s.play.hp.current, effectiveMaxHp(s), s.play.hp.temp || 0)
+        .catch((e) => console.warn("[Spirekeeper] vitals report", e.message));
+    }, 300);
+  }
+
+  /**
+   * The linked mini changed on the board: the GM applied damage through the
+   * bridge, or edited it in TaleSpire. Follow the board, but only when the
+   * board itself moved, so a stale board value never overwrites a change made
+   * here a moment ago that the GM hasn't written yet.
+   */
+  let lastBoardVitals = null;
+  async function followLinkedMini() {
+    const s = state.sheet;
+    if (!s || !state.creatureId) return;
+    let info;
+    try {
+      info = await Board.oneCreature(state.creatureId);
+    } catch {
+      return;
+    }
+    if (!info?.hp || !(info.hp.max > 0)) return;
+    const tempStat = Vitals.tempStatOf(info);
+    const seen = { hp: info.hp.value, temp: tempStat ? tempStat.value : null };
+    const before = lastBoardVitals;
+    lastBoardVitals = seen;
+    if (!before) return; // first look: nothing has moved yet
+
+    const play = s.play;
+    let changed = false;
+    if (seen.hp !== before.hp && seen.hp !== play.hp.current) {
+      play.hp.current = Math.max(0, Math.min(effectiveMaxHp(s), seen.hp));
+      changed = true;
+    }
+    if (tempStat && seen.temp !== before.temp && seen.temp !== play.hp.temp) {
+      play.hp.temp = Math.max(0, seen.temp || 0);
+      changed = true;
+    }
+    if (changed) {
+      renderHp(s);
+      savePlay();
+      toast(`HP updated from the board: ${play.hp.current}/${effectiveMaxHp(s)}${play.hp.temp ? ` +${play.hp.temp} temp` : ""}.`);
+    }
+  }
+
+  /** The GM set this character's temp pool (campaigns without a Temp HP stat). */
+  function onTempFromGm({ creatureId, temp }) {
+    if (!state.sheet || creatureId !== state.creatureId) return;
+    state.sheet.play.hp.temp = Math.max(0, Number(temp) || 0);
+    renderHp(state.sheet);
+    savePlay();
+  }
+
+  /** The GM's monster hit this character and there's no bridge: apply it here. */
+  function onHitFromGm({ creatureId, amount, source }) {
+    if (!state.sheet || creatureId !== state.creatureId) return;
+    const n = Math.max(0, Math.round(Number(amount) || 0));
+    if (!n) return;
+    const tempBefore = state.sheet.play.hp.temp || 0;
+    applyHp(-n);
+    const absorbed = Math.min(tempBefore, n);
+    toast(`${source || "The GM"} hits you for ${n}${absorbed ? ` (${absorbed} from temp HP)` : ""}.`);
+  }
+
+  /** A player's panel reported its vitals; as GM, keep the mini in step. */
+  async function onVitalsFromPlayer({ creatureId, hp, max, temp }) {
+    if (!state.isGM || !creatureId) return;
+    Vitals.report(creatureId, { hp, max, temp });
+    GM.refresh();
+    if (!Bridge.canWrite()) return;
+    let info;
+    try {
+      info = await Board.oneCreature(creatureId);
+    } catch {
+      return;
+    }
+    if (!info) return;
+    const v = Vitals.read(info);
+    const r = await Vitals.write(v, { hp, max, temp });
+    if (!r.ok) console.warn("[Spirekeeper] could not write reported vitals", r.error);
   }
 
   /**
@@ -1386,6 +1641,7 @@ const App = (() => {
     play.hp.temp = amount;
     renderHp(state.sheet);
     savePlay();
+    reportVitals();
     toast(`Temp HP set to ${amount}.`);
   }
 
@@ -1399,9 +1655,10 @@ const App = (() => {
       delta += absorbed;
     }
 
-    play.hp.current = Math.max(0, Math.min(state.sheet.hp.max, play.hp.current + delta));
+    play.hp.current = Math.max(0, Math.min(effectiveMaxHp(state.sheet), play.hp.current + delta));
     renderHp(state.sheet);
     savePlay();
+    reportVitals();
   }
 
   function renderHitDice(s) {
@@ -1484,8 +1741,11 @@ const App = (() => {
   async function longRest() {
     const s = state.sheet;
 
+    // Every maximum HP change here (Aid, Life Drain) ends on a long rest
+    s.play.maxHpMods = [];
     s.play.hp.current = s.hp.max;
     s.play.hp.temp = 0;
+    reportVitals();
     for (const slot of s.spellcasting.slots) s.play.slotsUsed[slot.level] = 0;
     s.play.pactUsed = 0;
     for (const r of s.resources) s.play.resourcesUsed[r.name] = 0;
@@ -1849,7 +2109,10 @@ const App = (() => {
 
     await Store.bind(selected[0].id, state.sheetId);
     state.creatureId = selected[0].id;
+    lastBoardVitals = null;
     renderBindBar();
+    reportVitals();
+    followLinkedMini();
     toast("Mini linked.");
   }
 
@@ -2831,8 +3094,22 @@ const App = (() => {
       line += ` ${Rolls.dim("healed")}`;
     }
 
+    // The extra dice of a monster's crit, rolled after the attack landed
+    if (ctx.kind === "critExtra") {
+      await applyMonsterDamage(ctx.target, (ctx.base || 0) + (summary.damage || 0), ctx.source, ctx.creatureId, true);
+      return;
+    }
+
     await Rolls.post(line, ctx.creatureId || state.creatureId);
     toast(line.replace(/<[^>]+>/g, ""));
+
+    // The GM's own turn runs itself: a monster's attack against a target whose
+    // AC we could read is a hit or a miss without anyone ruling on it, and a
+    // hit's damage (rolled in the same throw) goes straight onto the target.
+    if (state.isGM && ctx.monster && ctx.kind === "attack" && target?.id && verdict !== null) {
+      await resolveMonsterAttack(summary, verdict);
+      return;
+    }
 
     // A GM's own damage counts too. Rolling a player's attack for them, or a
     // monster's, is the same number needing the same target — and the roll
@@ -2861,6 +3138,71 @@ const App = (() => {
 
   async function announce(text) {
     await Rolls.post(text, state.creatureId);
+  }
+
+  /** "1d6+3+2d6" -> "1d6+2d6": the dice a crit adds again, without the modifier. */
+  const diceOnly = (expr) => (String(expr || "").match(/\d*d\d+/g) || []).join("+");
+
+  async function resolveMonsterAttack(summary, hit) {
+    const ctx = summary.context;
+    if (!hit) return; // the posted line already says MISS
+    const base = summary.damage;
+    if (base == null) return toast(`${ctx.source} hits ${ctx.target.name}: no damage dice on this attack.`);
+
+    // A natural 20 doubles the damage dice. The first set was rolled with the
+    // attack, so roll the extra set now and apply both when it lands.
+    if (summary.natural === 20 && diceOnly(ctx.damageExpr)) {
+      try {
+        await Rolls.stage({
+          name: `${ctx.source} crit dice`,
+          damage: diceOnly(ctx.damageExpr),
+          damageName: `${ctx.source} crit dice`,
+          context: { kind: "critExtra", target: ctx.target, base, source: ctx.source, creatureId: ctx.creatureId },
+        });
+        renderStaged();
+      } catch (e) {
+        toast(`Crit dice: ${e.message}. Applying the normal damage.`, true);
+        await applyMonsterDamage(ctx.target, base, ctx.source, ctx.creatureId, false);
+      }
+      return;
+    }
+    await applyMonsterDamage(ctx.target, base, ctx.source, ctx.creatureId, false);
+  }
+
+  /**
+   * Put a monster's damage onto its target, temp HP first. With the bridge it
+   * goes straight onto the mini (and the player's panel follows the board).
+   * Without it, the player's panel is told to apply it; either way chat says
+   * what happened.
+   */
+  async function applyMonsterDamage(target, amount, source, speakerId, crit) {
+    const who = target?.name || "the target";
+    const what = `${source || "The monster"}${crit ? " crits" : " hits"} ${who} for ${amount}`;
+    let info = null;
+    try {
+      info = await Board.oneCreature(target.id);
+    } catch {
+      /* fall through: report without numbers */
+    }
+    const v = info ? Vitals.read(info) : null;
+
+    if (v && v.hp != null && Bridge.canWrite()) {
+      const next = Vitals.takeDamage({ hp: v.hp, temp: v.temp ?? 0 }, amount);
+      const ok = await writeVitals(v, { hp: next.hp, temp: next.temp }, who);
+      if (!ok) return;
+      const notes = [
+        next.absorbed ? `${next.absorbed} from temp HP` : null,
+        v.temp == null ? "temp HP unknown" : null,
+      ].filter(Boolean);
+      const line = `${what}${notes.length ? ` (${notes.join(", ")})` : ""} → ${next.hp}/${v.max ?? "?"}${next.temp ? ` +${next.temp} temp` : ""}`;
+      await Rolls.post(Rolls.bold(line), speakerId);
+      return toast(line);
+    }
+
+    // No bridge: the player's own panel applies it (temp first) if it's open
+    await Party.hit(target.id, amount, source).catch(() => {});
+    await Rolls.post(Rolls.bold(`${what}.`), speakerId);
+    toast(`${what}. Sent to their panel to apply; if it's closed, they'll need to apply it by hand.`);
   }
 
   // -------------------------------------------------------------------------
@@ -3089,6 +3431,12 @@ const App = (() => {
     const amount = () => Math.max(0, parseInt($("hp-amount").value, 10) || 0);
     $("hp-damage").onclick = () => applyHp(-amount());
     $("hp-heal").onclick = () => applyHp(amount());
+    $("maxhp-add").onclick = () => {
+      const n = parseInt($("maxhp-amount").value, 10);
+      if (!Number.isFinite(n) || !n) return toast("Enter how much the maximum changes, e.g. 5 or -7.", true);
+      addMaxHpMod(n, $("maxhp-name").value);
+      $("maxhp-name").value = "";
+    };
     $("hp-temp-add").onclick = () =>
       grantTempHp(Math.max(0, parseInt($("hp-temp-amount").value, 10) || 0));
 
@@ -3112,6 +3460,7 @@ const App = (() => {
       onError: (m) => toast(`Could not read the party: ${m}`, true),
       canWrite: () => Bridge.canWrite(),
       onSetHp: setPartyHp,
+      onSetTemp: setPartyTemp,
     });
 
     // The bridge appearing or going away changes which HP boxes are editable
@@ -3154,6 +3503,7 @@ const App = (() => {
       },
       onOpenMonster: openCombatantStatblock,
       onSetHp: setCombatantHp,
+      onSetTemp: setCombatantTemp,
       canWriteBoard: writesBoard,
       onLink: linkCombatant,
       onRemove: removeCombatant,
@@ -3265,7 +3615,12 @@ const App = (() => {
    * per property, so coalesce into a single re-read.
    */
   let encounterBoardTimer = null;
+  let followTimer = null;
   function onCreatureEvent(event) {
+    if (state.creatureId && event?.payload?.id === state.creatureId) {
+      clearTimeout(followTimer);
+      followTimer = setTimeout(followLinkedMini, 150);
+    }
     const structural = event?.kind === "creatureAdded" || event?.kind === "creatureRemoved";
     if (!structural && !Encounters.isWatching(event?.payload?.id)) return;
     clearTimeout(encounterBoardTimer);
@@ -3376,6 +3731,16 @@ document.addEventListener("DOMContentLoaded", () => {
       "pc-5": { id: "pc-5", name: "Unowned NPC", stats: [] },
     };
 
+    // A campaign with a "Temp HP" stat, as slot 2, on every fixture that has
+    // stats. window.devTempStat = false before load simulates a campaign
+    // without one, where temp HP travels over sync instead.
+    if (window.devTempStat !== false) {
+      for (const c of Object.values(devCreatures)) {
+        if (c.stats?.length) c.stats.splice(1, 0, { name: "Temp HP", value: 0, max: 0 });
+      }
+      devCreatures["pc-2"].stats[1] = { name: "Temp HP", value: 5, max: 5 };
+    }
+
     const devOwnedByPlayer = {
       dev: ["pc-1"],
       "dev-other": ["pc-2", "pc-3"],
@@ -3451,7 +3816,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ],
       },
       creatures: {
-        getSelectedCreatures: async () => [],
+        getSelectedCreatures: async () => (window.devSelected ? [{ id: window.devSelected }] : []),
         // Mirrors the real visibility rule: a player sees a name and nothing
         // else on a mini they don't own, so `stats` comes back empty.
         // Mirrors what TaleSpire actually does: a bare id string comes back
@@ -3532,6 +3897,14 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log("[dev] bridge", method, path, params || "");
         if (path === "/ping") return { ok: true, version: "dev" };
         if (path === "/whoami") return { ok: true, canGm: true };
+        if (path === "/stat" && method === "POST") {
+          const c = devCreatures[params.id];
+          const i = Number(params.index);
+          if (!c?.stats?.[i]) return { ok: false, error: "no such stat" };
+          c.stats[i] = { ...c.stats[i], value: Number(params.value), max: params.max != null ? Number(params.max) : c.stats[i].max };
+          setTimeout(() => onCreatureStateChange({ kind: "statChanged", payload: { id: params.id } }), 100);
+          return { ok: true };
+        }
         if (path === "/hp" && method === "POST") {
           const c = devCreatures[params.id];
           if (!c) return { ok: false, error: "creature not on this board" };

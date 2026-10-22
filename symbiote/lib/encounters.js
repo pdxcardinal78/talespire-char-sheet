@@ -74,9 +74,10 @@ const Encounters = (() => {
    * Record hit points just written through the bridge, so the row shows them
    * before TaleSpire's change event comes back round.
    */
-  function noteBoardHp(creatureId, value, max) {
+  function noteBoardHp(creatureId, value, max, temp) {
     if (!creatureId) return;
-    boardHp.set(creatureId, { value, max });
+    const prev = boardHp.get(creatureId) || {};
+    boardHp.set(creatureId, { ...prev, value, max, temp: temp ?? prev.temp ?? null });
     render();
   }
 
@@ -87,10 +88,20 @@ const Encounters = (() => {
   /** Which hit points to believe, and why. */
   function hpFor(combatant) {
     const board = combatant.creatureId ? boardHp.get(combatant.creatureId) : null;
+    // Temp HP lives on the mini when the campaign has a Temp HP stat, otherwise
+    // on the combatant here; monsters have no player panel to report it.
+    const onStat = board && board.tempIndex != null;
+    const temp = onStat ? board.temp ?? 0 : combatant.temp || 0;
+    const tempFields = {
+      temp,
+      tempSource: onStat ? "stat" : "panel",
+      tempIndex: onStat ? board.tempIndex : null,
+      tempMax: onStat ? board.tempMax : null,
+    };
     if (board && board.max > 0) {
-      return { value: board.value, max: board.max, source: "board" };
+      return { value: board.value, max: board.max, source: "board", ...tempFields };
     }
-    return { value: combatant.hp, max: combatant.maxHp, source: "panel" };
+    return { value: combatant.hp, max: combatant.maxHp, source: "panel", ...tempFields };
   }
 
   function applyDamage(combatant, amount) {
@@ -149,7 +160,14 @@ const Encounters = (() => {
     boardHp = new Map();
     const names = new Map();
     for (const info of infos || []) {
-      if (info?.hp) boardHp.set(info.id, { value: info.hp.value, max: info.hp.max });
+      if (info?.hp) {
+        const v = Vitals.read(info);
+        boardHp.set(info.id, {
+          value: info.hp.value, max: info.hp.max,
+          temp: v.tempSource === "stat" ? v.temp : null,
+          tempIndex: v.tempIndex, tempMax: v.tempMax,
+        });
+      }
       if (info?.id && info.name) names.set(info.id, info.name);
     }
 
@@ -310,7 +328,7 @@ const Encounters = (() => {
 
     const writesBoard = Boolean(deps.canWriteBoard?.(c));
     if (hp.source === "board" && !writesBoard) {
-      hpBox.innerHTML = `<span class="party-hp-text">${hp.value ?? "—"}${hp.max ? ` / ${hp.max}` : ""}</span>${track}`;
+      hpBox.innerHTML = `<span class="party-hp-text">${hp.value ?? "—"}${hp.max ? ` / ${hp.max}` : ""}${hp.temp > 0 ? ` +${hp.temp}` : ""}</span>${track}`;
       hpBox.title = "Hit points read from the mini on the board — change them in TaleSpire";
     } else {
       // The hit points are the control. Typing 12 sets them; typing -5 or +3
@@ -337,10 +355,26 @@ const Encounters = (() => {
       field.onfocus = () => field.select();
 
       const suffix = el("span", "combatant-hp-max", hp.max ? `/ ${hp.max}` : "");
+      const temp = document.createElement("input");
+      temp.type = "text";
+      temp.className = "combatant-hp-input hp-temp-input";
+      temp.value = hp.temp || "";
+      temp.placeholder = "0";
+      temp.size = 3;
+      temp.setAttribute("aria-label", `${c.label} temporary hit points`);
+      temp.title = hp.tempSource === "stat"
+        ? "Temp HP, on the mini's Temp HP stat"
+        : "Temp HP; damage typed as -5 takes it first";
+      temp.onkeydown = field.onkeydown;
+      temp.onfocus = () => temp.select();
+      temp.onchange = () => deps.onSetTemp?.(c, temp.value);
       const line = el("div", "combatant-hp-line");
       line.append(field, suffix);
+      const tempLine = el("div", "combatant-hp-line hp-temp-line");
+      tempLine.append(el("span", "hp-temp-note", "temp"), temp);
       hpBox.append(line);
       if (track) hpBox.insertAdjacentHTML("beforeend", track);
+      hpBox.append(tempLine);
     }
     row.appendChild(hpBox);
 

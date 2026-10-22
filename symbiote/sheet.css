@@ -1174,3 +1174,31 @@ textarea {
 }
 .import-manual > summary:hover { color: var(--fg); }
 .import-manual .steps { margin-top: 12px; }
+
+/* ---------- max HP changes ---------- */
+
+.maxhp-name {
+  flex: 1 1 120px;
+  min-width: 0;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+}
+.maxhp-mods { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 8px; }
+.maxhp-mods:empty { display: none; }
+.maxhp-mod {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+.maxhp-mod.is-down { border-color: var(--danger); }
+.hp-temp-note { color: var(--fg-dim); font-size: 11px; white-space: nowrap; }
+.hp-temp-line { align-items: center; }
+.combatant-hp-input.hp-temp-input { width: 32px; font-size: 12px; padding: 0 3px; }

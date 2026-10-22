@@ -18,7 +18,7 @@
 const GM = (() => {
   const failed = (r) => r && r.cause !== undefined;
 
-  let deps = {};        // { container, meta, onError, canWrite, onSetHp }
+  let deps = {};        // { container, meta, onError, canWrite, onSetHp, onSetTemp }
   let watching = [];    // creature ids we care about
   let rows = [];        // last known info, in display order
   let owners = new Map(); // playerId -> name
@@ -72,11 +72,18 @@ const GM = (() => {
       const stats = info.stats || [];
       const ac = stats.find((s) => /^ac$|armou?r/i.test(s.name || ""));
       const hp = info.hp || {};
+      // Temp HP from a campaign stat, else as reported by the player's panel
+      const v = Vitals.read(info);
+      const tempStat = Vitals.tempStatOf(info);
       return {
         id: info.id,
         name: info.name || "Unnamed",
         hp: Number.isFinite(hp.value) ? hp.value : null,
         hpMax: Number.isFinite(hp.max) ? hp.max : null,
+        temp: v.temp,
+        tempSource: v.tempSource,
+        tempIndex: v.tempIndex,
+        tempMax: v.tempMax,
         ac: ac && Number.isFinite(ac.value) ? ac.value : null,
         flying: Boolean(info.isFlying),
         hidden: Boolean(info.isExplicitlyHidden),
@@ -84,7 +91,7 @@ const GM = (() => {
         owner: (info.ownerIds || []).map((o) => owners.get(o)).filter(Boolean)[0] || null,
         // Other named stats, so a campaign that tracks e.g. Stress still shows it.
         extras: stats
-          .filter((s) => s !== ac && s.name && Number.isFinite(s.value))
+          .filter((s) => s !== ac && s.name && Number.isFinite(s.value) && !Vitals.TEMP_NAME.test(s.name))
           .map((s) => `${s.name} ${s.value}`),
       };
     });
@@ -166,14 +173,38 @@ const GM = (() => {
       const max = document.createElement("span");
       max.className = "combatant-hp-max";
       max.textContent = row.hpMax ? `/ ${row.hpMax}` : "";
+      // Temp HP: its own box, set exactly. Damage typed as -5 above takes it first.
+      const temp = document.createElement("input");
+      temp.type = "text";
+      temp.className = "combatant-hp-input hp-temp-input";
+      temp.value = row.temp ?? "";
+      temp.placeholder = row.temp == null ? "?" : "0";
+      temp.size = 3;
+      temp.setAttribute("aria-label", `${row.name} temporary hit points`);
+      temp.title = row.tempSource === "stat"
+        ? "Temp HP, from the campaign's Temp HP stat"
+        : row.tempSource === "panel"
+          ? "Temp HP, as reported by the player's panel"
+          : "Temp HP unknown: no Temp HP stat in this campaign and the player's panel hasn't reported";
+      temp.onkeydown = field.onkeydown;
+      temp.onfocus = () => temp.select();
+      temp.onchange = () => deps.onSetTemp?.(row, temp.value);
+      const tempLabel = document.createElement("span");
+      tempLabel.className = "hp-temp-note";
+      tempLabel.textContent = "temp";
       line.append(field, max);
+      const tempLine = document.createElement("div");
+      tempLine.className = "combatant-hp-line hp-temp-line";
+      tempLine.append(tempLabel, temp);
       hp.append(line);
       hp.insertAdjacentHTML("beforeend",
         `<span class="party-hp-track"><span class="party-hp-fill" style="width:${pct}%"></span></span>`);
+      hp.append(tempLine);
     } else {
       const pct = row.hpMax ? Math.max(0, Math.min(100, (row.hp / row.hpMax) * 100)) : 0;
+      const tempText = row.temp > 0 ? ` +${row.temp}` : "";
       hp.innerHTML =
-        `<span class="party-hp-text">${row.hp}${row.hpMax ? ` / ${row.hpMax}` : ""}</span>` +
+        `<span class="party-hp-text">${row.hp}${row.hpMax ? ` / ${row.hpMax}` : ""}${tempText}</span>` +
         `<span class="party-hp-track"><span class="party-hp-fill" style="width:${pct}%"></span></span>`;
     }
 

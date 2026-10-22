@@ -99,6 +99,15 @@
     <button id="hp-temp-add" class="btn btn-small">Temp HP</button>
   </div>
 
+  <!-- Changes to maximum HP (Aid, a wraith's Life Drain). Not temp HP: these
+       move the maximum itself, and all of them end on a long rest. -->
+  <div class="hp-bar maxhp-row">
+    <input id="maxhp-amount" type="number" value="5" aria-label="Change to maximum hit points, negative to lower it">
+    <input id="maxhp-name" class="maxhp-name" type="text" placeholder="Aid, Life Drain…" aria-label="What changed your maximum hit points" spellcheck="false">
+    <button id="maxhp-add" class="btn btn-small" title="Raise (or, with a negative number, lower) your maximum HP until a long rest">Max HP</button>
+  </div>
+  <div id="maxhp-mods" class="maxhp-mods"></div>
+
   <div class="hp-bar">
     <button id="rest-short" class="btn btn-small btn-ghost">Short rest</button>
     <button id="rest-long" class="btn btn-small btn-ghost">Long rest</button>
@@ -317,6 +326,7 @@
 <script src="lib/ddb.js"></script>
 <script src="lib/board.js"></script>
 <script src="lib/bridge.js"></script>
+<script src="lib/vitals.js"></script>
 <script src="lib/store.js"></script>
 <script src="lib/rolls.js"></script>
 <script src="lib/party.js"></script>

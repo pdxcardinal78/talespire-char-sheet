@@ -145,6 +145,12 @@ TaleSpire's campaign storage as you play.
   hit points first.
 - **Temp HP** — *Temp HP* grants a pool. Temporary hit points don't stack, so
   granting less than you already have is refused with a note rather than applied.
+- **Max HP changes** — Aid, a wraith's Life Drain and the like change your
+  *maximum*, which is not the same as temp HP. Enter the amount (negative to
+  lower it) and a name, and press *Max HP*. A raise lifts current HP by the same
+  amount; a drop only pulls current HP down if it's now over the new maximum.
+  Each change shows as a chip with `×` to end it early, the HP readout gets an
+  asterisk and explains itself on hover, and a long rest ends them all.
 - **Spell slots** — click a slot pip to spend one, right-click to give it back.
   A multiclass caster gets a line showing how the caster level was reached, e.g.
   *"Caster level 10: Rogue (Arcane Trickster) 8 → 2, Sorcerer 8 → 8. Warlock levels
@@ -883,6 +889,50 @@ while it's missing) and the client is a GM:
 If a write fails, the panel says so and, where it was keeping its own count,
 keeps it. Without the bridge nothing changes from before. Browser dev mode fakes
 the plugin; set `window.devBridge = false` before load to see the panel without it.
+
+## Temp HP across the table
+
+Temporary hit points are their own pool everywhere, never folded into HP:
+damage takes them first, healing never touches them, a new pool replaces the
+old only if it's larger, and a long rest clears them.
+
+Where a mini's temp pool lives depends on the campaign, and the panel never
+renames stats to change that:
+
+- **The campaign has a Temp HP stat** (any of the 8 named stats called *Temp
+  HP*, *Temporary HP*, *THP*...). The stat on the mini is the truth. The GM's
+  party and fight rows read and write it through the bridge, and TaleSpire shows
+  it like any other stat.
+- **It doesn't.** The player's own panel holds the pool and reports it, with HP
+  and maximum, to the GM's panel over sync whenever it changes. A party row whose
+  player hasn't reported shows `?` rather than assuming zero. Monsters keep theirs
+  on the combatant.
+
+Each player's report also keeps the board in step: with the bridge, the GM's
+panel writes the player's HP and maximum onto their mini, so max HP changes show
+on the board too. In the other direction, a player's panel follows its linked
+mini when the board changes, but only when the board value actually moved, so a
+stale board never overwrites a change made a moment ago.
+
+GM rows get a small temp box under the HP bar, set exactly. Typing `-5` in the HP
+box is damage and takes temp first; `12` and `+3` never touch temp.
+
+## The GM's monster attacks
+
+The table rolls and a person calls hit or miss, as before. The exception is the
+GM's own turn: when a monster from the Monsters view attacks a picked target
+whose AC the GM can read (an *AC* or *Armor Class* stat), the panel calls it.
+
+- A natural 1 misses and a natural 20 crits; otherwise the total against AC.
+- A hit applies the damage rolled in the same throw. A crit rolls the extra
+  damage dice first, then applies both.
+- Damage comes off temp HP first. With the bridge it's written onto the mini and
+  the player's panel follows; without it, the player's panel is told to apply it
+  (if it's open). Chat says what happened either way, e.g. *Goblin: Scimitar hits
+  Doran for 7 (3 from temp HP) → 19/23*.
+
+Attacks against a target with no readable AC work as before: the result is
+posted and a person decides.
 
 ## Known gaps
 

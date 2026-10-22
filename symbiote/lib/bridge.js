@@ -94,8 +94,27 @@ const Bridge = (() => {
     }
   }
 
+  /**
+   * Set one of the campaign's eight named stats (index 0 to 7) on a mini.
+   * Used for a "Temp HP" stat; the index comes from matching stat names, and
+   * the panel never renames stats.
+   */
+  async function setStat(creatureId, index, value, max) {
+    if (!canWrite()) return { ok: false, error: "bridge unavailable" };
+    const params = { id: creatureId, index: String(index), value: String(Math.round(value)) };
+    if (Number.isFinite(max)) params.max = String(Math.round(max));
+    try {
+      const r = await transport("POST", "/stat", params);
+      return r?.ok ? { ok: true } : { ok: false, error: r?.error || "write refused" };
+    } catch {
+      set({ available: false, canGm: false, version: null });
+      retryTimer = setTimeout(probe, RETRY_MS);
+      return { ok: false, error: "bridge unreachable" };
+    }
+  }
+
   return {
-    probe, canWrite, setHp, onChange, useTransport,
+    probe, canWrite, setHp, setStat, onChange, useTransport,
     get status() { return status; },
   };
 })();
