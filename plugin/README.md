@@ -21,7 +21,7 @@ plugin/
 ## Status
 
 Tested on an M5 Pro MacBook Pro, TaleSpire on Unity 2021.3.45f2, BepInEx
-5.4.23.5, plugin 0.1.2.
+5.4.23.5. Board writes verified on plugin 0.1.2; 0.2.0 adds the security below.
 
 | Check | Result |
 |---|---|
@@ -125,14 +125,45 @@ includes each mini's `position` and `rotation`, so an area-of-effect helper
 
 | Route | Does |
 |---|---|
-| `GET /ping` | Version check; no game access |
+| `GET /ping` | Version check; no game access, open to anyone |
 | `GET /whoami` | Whether this client has GM rights |
 | `GET /selected` | The selected mini: id, name, HP, persistent emote ids |
 | `GET /creature?id=` | The same for any mini on the board |
-| `GET /hp?id=&value=&max=` | Set HP; `max` optional |
-| `GET /emote?id=&emote=&on=0\|1` | Remove or add a persistent emote |
+| `POST /hp?id=&value=&max=` | Set HP; `max` optional. GM only |
+| `POST /emote?id=&emote=&on=0\|1` | Remove or add a persistent emote. GM only |
 
-Use `curl -G --data-urlencode` for ids rather than pasting them into a URL.
+## Security (0.2.0)
+
+- **Only TaleSpire's own panels.** Every route but `/ping` requires an `Origin`
+  header equal to TaleSpire's symbiote server (`http://localhost:<port>`, read
+  from `WebViewEnvironment` at runtime since the port changes each launch).
+  Browsers always send `Origin` on a cross-origin request and pages can't forge
+  it, so a website open in Chrome can't drive the bridge. CORS headers echo
+  that origin only.
+- **Writes are POST and GM only.** TaleSpire applies these ops on every client
+  without checking rights, so the plugin checks `LocalPlayer.Rights.CanGm`.
+  Refusals are logged as warnings in `LogOutput.log`.
+- **Not covered:** a native program on the same Mac can forge an `Origin`
+  header. Anything able to do that can already do far worse, so this is out of
+  scope.
+
+### Testing with curl
+
+`curl` sends no `Origin`, so from 0.2.0 it's refused. To test from Terminal,
+set this in `BepInEx/config/net.spirekeeper.bridge.cfg` (created on first
+launch) and restart TaleSpire:
+
+```
+[Security]
+AllowRequestsWithoutOrigin = true
+```
+
+Turn it back off afterwards. Writes then look like:
+
+```bash
+curl -s -X POST -G http://127.0.0.1:47817/hp --data-urlencode "id=$MINI" -d value=12
+curl -s -X POST -G http://127.0.0.1:47817/emote --data-urlencode "id=$MINI" --data-urlencode "emote=$EMOTE" -d on=0
+```
 
 ## Build
 
@@ -170,12 +201,12 @@ Remove everything with `./plugin/install-mac.sh --uninstall`.
 | # | Do this | Confirms |
 |---|---|---|
 | 1 | Launch with `./run_bepinex.sh` | BepInEx can start the game |
-| 2 | `BepInEx/LogOutput.log` shows `Spirekeeper Bridge 0.1.2 loaded` and `Accept loop running` | the plugin loads |
+| 2 | `BepInEx/LogOutput.log` shows `Spirekeeper Bridge 0.2.0 loaded` and `Accept loop running` | the plugin loads |
 | 3 | `curl -s http://127.0.0.1:47817/ping` | the server is up |
 | 4 | Open a board and the **Spirekeeper Bridge Probe** panel; Bridge says *connected* | a panel can reach the plugin |
 | 5 | Select a mini, **Use selected mini**, **−5**: HP drops on the board and the log shows an `event` line | HP write, seen by Spirekeeper |
 | 6 | Repeat 5 and 7 with a second client on the board running plain TaleSpire | changes reach clients without the plugin |
-| 7 | Give a mini a persistent emote, `curl -s http://127.0.0.1:47817/selected`, then `/emote` with `on=0` | conditions can be toggled on minis |
+| 7 | Give a mini a persistent emote, then with curl allowed (see Security) `GET /selected` and `POST /emote` with `on=0` | conditions can be toggled on minis |
 
 ## Troubleshooting
 
@@ -189,14 +220,11 @@ the game, waits 45 seconds, and collects `LogOutput.log`, any
 | No `LogOutput.log` and a `preloader_*.log` in the game folder | Preloader crashed; check the patched preloader was installed (Apple Silicon) |
 | No `LogOutput.log` and no `preloader_*.log` | Doorstop never injected; TaleSpire wasn't started through `run_bepinex.sh` |
 | `curl` says connection refused, log says listening | Server was stopped; check you are on 0.1.2 or later |
+| `curl` gets 403 "requests without an Origin are refused" | Expected from 0.2.0; see Testing with curl |
+| Panel gets 403, log says "origin is not TaleSpire's symbiote server" | The panel isn't being served by TaleSpire, or TaleSpire changed how it hosts panels |
 | `curl` works, panel says "Failed to fetch" | Webview is blocking the call; turn on symbiote dev mode for remote debugging |
 
-## Before this is used in a real game
+## Still to do
 
-- **Auth.** Any program on the Mac can call the server while TaleSpire runs.
-  Needs a per-session token the panel gets from the plugin.
-- **GM gating.** Writes are accepted from any client. TaleSpire doesn't check
-  rights when it applies the op, so the plugin must refuse writes unless
-  `LocalPlayer.Rights.CanGm`.
 - **Windows.** Only the macOS installer exists. Windows uses the stock Windows
   BepInEx build and needs none of the arm64 workarounds.

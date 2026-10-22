@@ -43,8 +43,8 @@ function log(...parts) {
   $("log").textContent = line + "\n" + $("log").textContent;
 }
 
-async function bridge(path) {
-  const res = await fetch(BRIDGE + path);
+async function bridge(path, method = "GET") {
+  const res = await fetch(BRIDGE + path, { method });
   return res.json();
 }
 
@@ -90,7 +90,7 @@ async function useSelected() {
 async function setHp(value, max) {
   if (!creatureId) return log("pick a mini first");
   const q = `id=${encodeURIComponent(creatureId)}&value=${value}` + (max !== "" ? `&max=${max}` : "");
-  try { log("set", await bridge(`/hp?${q}`)); }
+  try { log("set", await bridge(`/hp?${q}`, "POST")); }
   catch (e) { log("set failed", String(e)); }
 }
 

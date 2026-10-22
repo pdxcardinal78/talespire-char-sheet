@@ -28,14 +28,18 @@ namespace Spirekeeper.Bridge
     {
         public const string Guid = "net.spirekeeper.bridge";
         public const string Name = "Spirekeeper Bridge";
-        public const string Version = "0.1.2";
+        public const string Version = "0.2.0";
         public const int Port = 47817;
 
         internal static ManualLogSource Log;
+        internal static BepInEx.Configuration.ConfigEntry<bool> AllowWithoutOrigin;
 
         void Awake()
         {
             Log = Logger;
+            AllowWithoutOrigin = Config.Bind("Security", "AllowRequestsWithoutOrigin", false,
+                "Accept requests that carry no Origin header, such as curl from Terminal. " +
+                "Only for testing: with this on, any program on this computer can drive the bridge.");
             Log.LogInfo($"{Name} {Version} loaded (Unity {Application.unityVersion}, {Application.platform})");
             Pump.Ensure();
             Server.Start();
@@ -159,35 +163,88 @@ namespace Spirekeeper.Bridge
         {
             var req = ctx.Request;
             var res = ctx.Response;
+            var path = req.Url.AbsolutePath.TrimEnd('/');
+            var origin = req.Headers["Origin"];
 
-            // The symbiote panel is a web page on another origin, so it needs CORS.
-            // Chromium's private network access rules also want the last header
-            // before a page may call localhost.
-            res.AddHeader("Access-Control-Allow-Origin", "*");
-            res.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            res.AddHeader("Access-Control-Allow-Headers", "Content-Type");
-            res.AddHeader("Access-Control-Allow-Private-Network", "true");
+            // /ping touches nothing in the game, so anyone may ask
+            if (path == "/ping")
+            {
+                if (origin != null) res.AddHeader("Access-Control-Allow-Origin", origin);
+                Send(res, 200, Json.Ok($"\"version\":\"{BridgePlugin.Version}\",\"unity\":\"{Application.unityVersion}\""));
+                return;
+            }
 
+            // Everything else must come from a TaleSpire symbiote panel. Browsers
+            // always send Origin on a cross-origin fetch and a web page cannot
+            // forge it, so a site open in Chrome can't drive the bridge. A
+            // request with no Origin (curl, a native app) is refused unless the
+            // config allows it for testing.
+            if (!Allowed(origin, out var why))
+            {
+                BridgePlugin.Log.LogWarning($"Refused {req.HttpMethod} {req.Url.PathAndQuery} from {origin ?? "no origin"}: {why}");
+                Send(res, 403, Json.Err(why));
+                return;
+            }
+            if (origin != null)
+            {
+                res.AddHeader("Access-Control-Allow-Origin", origin);
+                res.AddHeader("Vary", "Origin");
+                res.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                res.AddHeader("Access-Control-Allow-Headers", "Content-Type");
+                res.AddHeader("Access-Control-Allow-Private-Network", "true");
+            }
             if (req.HttpMethod == "OPTIONS") { Send(res, 204, ""); return; }
 
             string body = "";
             if (req.HasEntityBody)
                 using (var r = new StreamReader(req.InputStream, Encoding.UTF8)) body = r.ReadToEnd();
 
-            var path = req.Url.AbsolutePath.TrimEnd('/');
             BridgePlugin.Log.LogInfo($"{req.HttpMethod} {req.Url.PathAndQuery}");
+            var reply = Routes.Dispatch(req.HttpMethod, path, req.QueryString, body, OnMainThread, out var status);
+            Send(res, status, reply);
+        }
 
-            string reply;
-            switch (path)
+        static string _symbioteOrigin;
+
+        static bool Allowed(string origin, out string why)
+        {
+            why = null;
+            if (origin == null)
             {
-                case "/ping":
-                    reply = Json.Ok($"\"version\":\"{BridgePlugin.Version}\",\"unity\":\"{Application.unityVersion}\"");
-                    break;
-                default:
-                    reply = Routes.Dispatch(path, req.QueryString, body, OnMainThread);
-                    break;
+                if (BridgePlugin.AllowWithoutOrigin.Value) return true;
+                why = "requests without an Origin are refused (see AllowRequestsWithoutOrigin)";
+                return false;
             }
-            Send(res, reply == null ? 404 : 200, reply ?? Json.Err("no such route"));
+            var expected = SymbioteOrigin();
+            if (expected == null) { why = "TaleSpire's symbiote server isn't running yet"; return false; }
+            if (string.Equals(origin, expected, StringComparison.OrdinalIgnoreCase)) return true;
+            why = "origin is not TaleSpire's symbiote server";
+            return false;
+        }
+
+        // TaleSpire serves every symbiote panel from its own HttpListener on
+        // http://localhost:<random port>/symbiotes/. The port changes each
+        // launch, so read it from WebViewEnvironment once it exists.
+        static string SymbioteOrigin()
+        {
+            if (_symbioteOrigin != null) return _symbioteOrigin;
+            var found = OnMainThread(() =>
+            {
+                var env = UnityEngine.Object.FindObjectOfType<Symbiotes.WebView.WebViewEnvironment>();
+                if (env == null) return null;
+                var field = typeof(Symbiotes.WebView.WebViewEnvironment).GetField("_localSymbioteAddressPrefix",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                var prefix = field?.GetValue(env) as string;
+                if (string.IsNullOrEmpty(prefix)) return null;
+                var uri = new Uri(prefix);
+                return $"{uri.Scheme}://{uri.Authority}";
+            });
+            if (found != null && !found.StartsWith("{"))
+            {
+                _symbioteOrigin = found;
+                BridgePlugin.Log.LogInfo($"Accepting requests from {found}");
+            }
+            return _symbioteOrigin;
         }
 
         static void Send(HttpListenerResponse res, int status, string json)

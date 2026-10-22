@@ -14,18 +14,54 @@ namespace Spirekeeper.Bridge
 {
     internal static class Routes
     {
-        // Returns null for an unknown route
-        public static string Dispatch(string path, NameValueCollection q, string body, Func<Func<string>, string> onMain)
+        // Reads are GET. Writes must be POST, which a browser won't send
+        // cross-origin without a CORS preflight, and only a GM may make them:
+        // TaleSpire applies these ops on every client without checking rights,
+        // so this is the only place that check can happen.
+        public static string Dispatch(string method, string path, NameValueCollection q, string body,
+            Func<Func<string>, string> onMain, out int status)
         {
+            status = 200;
+            bool isWrite = path == "/hp" || path == "/emote";
             switch (path)
             {
-                case "/whoami": return onMain(WhoAmI);
-                case "/selected": return onMain(Selected);
-                case "/creature": return onMain(() => Creature(q["id"]));
-                case "/hp": return onMain(() => SetHp(q["id"], q["value"], q["max"]));
-                case "/emote": return onMain(() => SetEmote(q["id"], q["emote"], q["on"]));
-                default: return null;
+                case "/whoami": case "/selected": case "/creature":
+                case "/hp": case "/emote":
+                    break;
+                default:
+                    status = 404;
+                    return Json.Err("no such route");
             }
+            if (isWrite && method != "POST")
+            {
+                status = 405;
+                return Json.Err(path + " must be POST");
+            }
+            if (!isWrite && method != "GET")
+            {
+                status = 405;
+                return Json.Err(path + " must be GET");
+            }
+
+            int code = 200;
+            var reply = onMain(() =>
+            {
+                if (isWrite && !LocalPlayer.Rights.CanGm)
+                {
+                    code = 403;
+                    return Json.Err("only a GM can change the board");
+                }
+                switch (path)
+                {
+                    case "/whoami": return WhoAmI();
+                    case "/selected": return Selected();
+                    case "/creature": return Creature(q["id"]);
+                    case "/hp": return SetHp(q["id"], q["value"], q["max"]);
+                    default: return SetEmote(q["id"], q["emote"], q["on"]);
+                }
+            });
+            status = code;
+            return reply;
         }
 
         static string WhoAmI() =>
