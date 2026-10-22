@@ -584,7 +584,7 @@ const App = (() => {
     const temp = Math.round(n);
     const hp = Encounters.hpFor(combatant);
     if (hp.tempIndex != null && writesBoard(combatant)) {
-      const r = await Bridge.setStat(combatant.creatureId, hp.tempIndex, temp, Math.max(temp, hp.tempMax || 0));
+      const r = await Bridge.setStat(combatant.creatureId, hp.tempIndex, temp, Vitals.tempStatMax(hp.temp, hp.tempMax, temp));
       if (!r.ok) {
         Encounters.render();
         return toast(`Couldn't set ${combatant.label}'s temp HP on the board (${r.error}).`, true);

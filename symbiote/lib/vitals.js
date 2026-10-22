@@ -100,6 +100,18 @@ const Vitals = (() => {
     };
   }
 
+  /**
+   * The Temp HP stat's max, which TaleSpire shows as "value/max". It records
+   * the size of the current pool: a new or larger pool sets it, damage leaves
+   * it (6 temp hit for 4 shows 2/6), and an empty pool resets it to 0 so the
+   * next grant of 4 shows 4/4, not 4/6.
+   */
+  function tempStatMax(prevTemp, prevMax, nextTemp) {
+    if (!(nextTemp > 0)) return 0;
+    if (nextTemp > (prevTemp || 0)) return nextTemp;
+    return Math.max(prevMax || 0, nextTemp);
+  }
+
   /** Temp HP doesn't stack: keep the larger pool. */
   const grantTemp = (current, amount) => Math.max(current || 0, amount || 0);
 
@@ -117,8 +129,7 @@ const Vitals = (() => {
     }
     if (next.temp != null && next.temp !== v.temp) {
       if (v.tempIndex != null) {
-        // The stat's max is only a display ceiling; keep it at least the pool
-        const max = Math.max(next.temp, v.tempMax || 0);
+        const max = tempStatMax(v.temp, v.tempMax, next.temp);
         const r = await Bridge.setStat(v.id, v.tempIndex, next.temp, max);
         if (!r.ok) return r;
       } else {
@@ -136,7 +147,7 @@ const Vitals = (() => {
 
   return {
     TEMP_NAME, AC_NAME, findStat, tempStatOf, acOf, campaignHasTempStat, emptyStatSlot,
-    report, read, takeDamage, grantTemp, write, tempLabel,
+    report, read, takeDamage, grantTemp, tempStatMax, write, tempLabel,
     reportedFor: (id) => reported.get(id) || null,
   };
 })();
