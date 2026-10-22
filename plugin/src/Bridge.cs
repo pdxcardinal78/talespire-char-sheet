@@ -28,7 +28,7 @@ namespace Spirekeeper.Bridge
     {
         public const string Guid = "net.spirekeeper.bridge";
         public const string Name = "Spirekeeper Bridge";
-        public const string Version = "0.2.0";
+        public const string Version = "0.3.0";
         public const int Port = 47817;
 
         internal static ManualLogSource Log;

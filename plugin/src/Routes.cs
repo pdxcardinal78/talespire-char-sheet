@@ -22,11 +22,11 @@ namespace Spirekeeper.Bridge
             Func<Func<string>, string> onMain, out int status)
         {
             status = 200;
-            bool isWrite = path == "/hp" || path == "/emote";
+            bool isWrite = path == "/hp" || path == "/stat" || path == "/emote";
             switch (path)
             {
                 case "/whoami": case "/selected": case "/creature":
-                case "/hp": case "/emote":
+                case "/hp": case "/stat": case "/emote":
                     break;
                 default:
                     status = 404;
@@ -57,6 +57,7 @@ namespace Spirekeeper.Bridge
                     case "/selected": return Selected();
                     case "/creature": return Creature(q["id"]);
                     case "/hp": return SetHp(q["id"], q["value"], q["max"]);
+                    case "/stat": return SetStat(q["id"], q["index"], q["value"], q["max"]);
                     default: return SetEmote(q["id"], q["emote"], q["on"]);
                 }
             });
@@ -102,6 +103,25 @@ namespace Spirekeeper.Bridge
             CreatureManager.SetCreatureStatByIndex(id, new CreatureStat(value, max), -1);
             BridgePlugin.Log.LogInfo($"HP {id}: {before.Value}/{before.Max} -> {value}/{max}");
             return Json.Ok($"\"before\":{Num(before.Value)},\"value\":{Num(value)},\"max\":{Num(max)}");
+        }
+
+        // One of the campaign's eight named stats, by index 0 to 7. Spirekeeper
+        // finds the slot by name (for example a "Temp HP" stat) and never renames
+        // stats itself, so the index always comes from the panel.
+        static string SetStat(string idStr, string indexStr, string valueStr, string maxStr)
+        {
+            if (!CreatureGuid.TryParse(idStr ?? "", out var id)) return Json.Err("bad creature id");
+            if (!int.TryParse(indexStr ?? "", out var index) || index < 0 || index > 7)
+                return Json.Err("index must be 0 to 7");
+            if (!CreatureManager.TryGetCreatureData(id, out var data)) return Json.Err("creature not on this board");
+            if (!TryNum(valueStr, out var value)) return Json.Err("value must be a number");
+            var current = data.StatByIndex(index);
+            float max = current.Max;
+            if (!string.IsNullOrEmpty(maxStr) && !TryNum(maxStr, out max)) return Json.Err("max must be a number");
+
+            CreatureManager.SetCreatureStatByIndex(id, new CreatureStat(value, max), index);
+            BridgePlugin.Log.LogInfo($"Stat {index} {id}: {current.Value}/{current.Max} -> {value}/{max}");
+            return Json.Ok($"\"before\":{Num(current.Value)},\"value\":{Num(value)},\"max\":{Num(max)}");
         }
 
         // Persistent emotes are the closest thing a mini has to a condition marker.
