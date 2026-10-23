@@ -150,28 +150,46 @@ namespace Spirekeeper.Bridge
             return Json.Ok("\"creatures\":" + sb);
         }
 
-        // TaleSpire's statuses: the persistent emotes in its emote catalog, with
-        // the names shown in the radial menu. Their ids come from the game's own
-        // content, so they're the same ids minis report, in every campaign.
+        // TaleSpire's statuses, as the mini's radial menu lists them. The menu
+        // keeps its own list (CreatureMenuBoardTool._statusEmotes), separate
+        // from the emote catalog, which holds only a couple of persistent ones.
+        // Both are read and merged by id; "menu" marks the radial menu's. The ids
+        // are the game's own content ids, the same ones minis report.
         static string StatusCatalog()
         {
-            var collection = EmoteManager.GetCollection();
-            if (collection == null) return Json.Err("emote catalog not loaded yet");
+            var seen = new System.Collections.Generic.HashSet<string>();
             var sb = new System.Text.StringBuilder("[");
-            bool first = true;
-            foreach (var item in collection.Emotes)
+            int count = 0;
+            void Add(ActionTimeline e, bool menu)
             {
-                var e = item?.Emote;
-                if (e == null || !e.IsPersistant) continue;
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append("{\"id\":").Append(Json.Str(e.ActionTimelineId.ToString()))
+                if (e == null) return;
+                var id = e.ActionTimelineId.ToString();
+                if (!seen.Add(id)) return;
+                if (count++ > 0) sb.Append(',');
+                sb.Append("{\"id\":").Append(Json.Str(id))
                   .Append(",\"name\":").Append(Json.Str(string.IsNullOrEmpty(e.DisplayName) ? e.name : e.DisplayName))
                   .Append(",\"icon\":").Append(Json.Str(e.IconName))
+                  .Append(",\"menu\":").Append(menu ? "true" : "false")
                   .Append('}');
             }
+
+            var field = typeof(CreatureMenuBoardTool).GetField("_statusEmotes",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+            foreach (var tool in UnityEngine.Resources.FindObjectsOfTypeAll<CreatureMenuBoardTool>())
+            {
+                if (!(field?.GetValue(tool) is ActionTimelineCollection list) || list == null) continue;
+                for (int i = 0; i < list.Count; i++) Add(list[i], true);
+            }
+            int fromMenu = count;
+
+            var collection = EmoteManager.GetCollection();
+            if (collection != null)
+                foreach (var item in collection.Emotes)
+                    if (item?.Emote != null && item.Emote.IsPersistant) Add(item.Emote, false);
+
+            if (count == 0) return Json.Err("status list not loaded yet; open a board and try again");
             sb.Append(']');
-            return Json.Ok("\"statuses\":" + sb);
+            return Json.Ok($"\"fromMenu\":{fromMenu},\"statuses\":" + sb);
         }
 
         // Leave a zone on the board as one of TaleSpire's own area markers, which

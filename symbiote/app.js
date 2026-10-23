@@ -70,8 +70,8 @@ const App = (() => {
         onVitals: onVitalsFromPlayer,
         onTemp: onTempFromGm,
         onHit: onHitFromGm,
-        onStatusMapping: ({ emoteId, condition }) => {
-          Statuses.setMapping(emoteId, condition, false).then(() => followLinkedMini());
+        onStatusMapping: ({ condition, emoteId }) => {
+          Statuses.setMapping(condition, emoteId, false).then(() => followLinkedMini());
         },
         onStatusRequest: () => {
           if (state.isGM) Statuses.shareAll();
@@ -160,7 +160,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.22.0";
+  const APP_VERSION = "0.23.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -3061,7 +3061,9 @@ const App = (() => {
     const seen = {
       hp: hasHp ? info.hp.value : null,
       temp: tempStat ? tempStat.value : null,
-      conditions: Statuses.on(info).conditions,
+      // Each status with the conditions it stands for, so a new pairing for a
+      // status already on the mini counts as a change too
+      emotes: Statuses.on(info).emotes.map((id) => `${id}=${Statuses.conditionsFor(id).join("+")}`),
     };
     const before = lastBoardVitals;
     lastBoardVitals = seen;
@@ -3069,20 +3071,35 @@ const App = (() => {
     const play = s.play;
     const notes = [];
 
-    // Conditions: the statuses the GM has paired. On the first look only add
-    // what the board shows; after that, follow what changed on the board.
+    // Conditions, by the statuses on the mini. On the first look only add what
+    // the board shows; after that, follow what changed. A status several
+    // conditions share can't say which, so it asks rather than guessing, and
+    // taking it off clears every condition it stands for.
     const has = (name) => play.conditions.some((c) => c.name === name);
-    const added = seen.conditions.filter((c) => !before || !before.conditions.includes(c));
-    const removed = before ? before.conditions.filter((c) => !seen.conditions.includes(c)) : [];
-    for (const name of added) {
-      if (has(name)) continue;
-      play.conditions.push({ name, level: name === "Exhaustion" ? 1 : null });
-      notes.push(`now ${name}`);
+    const added = seen.emotes.filter((e) => !before || !before.emotes.includes(e));
+    const removed = before ? before.emotes.filter((e) => !seen.emotes.includes(e)) : [];
+    const condsOf = (key) => key.slice(key.indexOf("=") + 1).split("+").filter(Boolean);
+    const idOf = (key) => key.slice(0, key.indexOf("="));
+    for (const key of added) {
+      const id = idOf(key);
+      const conds = condsOf(key);
+      if (conds.length === 1) {
+        if (has(conds[0])) continue;
+        play.conditions.push({ name: conds[0], level: conds[0] === "Exhaustion" ? 1 : null });
+        notes.push(`now ${conds[0]}`);
+      } else if (conds.length > 1 && !conds.some(has)) {
+        toast(`The board shows ${Statuses.labelOf(id)} on you, which is ${conds.join(" or ")}. Add whichever applies under Conditions.`);
+      }
     }
-    for (const name of removed) {
-      if (!has(name)) continue;
-      play.conditions = play.conditions.filter((c) => c.name !== name);
-      notes.push(`no longer ${name}`);
+    for (const key of removed) {
+      // A status re-paired but still on the mini keeps any condition it still means
+      const still = seen.emotes.find((k) => idOf(k) === idOf(key));
+      const kept = still ? condsOf(still) : [];
+      for (const name of condsOf(key)) {
+        if (!has(name) || kept.includes(name)) continue;
+        play.conditions = play.conditions.filter((c) => c.name !== name);
+        notes.push(`no longer ${name}`);
+      }
     }
 
     // Hit points: only once the board has moved, never on the first look
@@ -3155,41 +3172,54 @@ const App = (() => {
   }
 
   /**
-   * The GM's pairing list: every TaleSpire status by name (from the bridge's
-   * catalog), with a condition picker, a note of which minis wear it now, and a
-   * suggestion where the names match. Without the bridge it falls back to the
-   * statuses seen on minis.
+   * The GM's pairing list: every 5e condition, each with a picker of
+   * TaleSpire's statuses (the radial menu's list, read through the bridge).
+   * Several conditions can share one status. Where a status's name matches a
+   * condition it's offered as a suggestion.
    */
   function renderStatusMap() {
     const box = $("status-map");
     if (!box) return;
     box.replaceChildren();
-    const items = Statuses.list();
-    if (!items.length) {
-      const p = document.createElement("p");
-      p.className = "hint";
-      p.textContent = Bridge.status.available
-        ? "Reading TaleSpire's statuses…"
-        : "With the bridge running this lists every TaleSpire status by name. Without it, set a status on a mini and it appears here.";
-      box.appendChild(p);
-      return;
-    }
+    if (state.isGM && Bridge.status.available && !Statuses.catalogLoaded()) Statuses.loadCatalog();
 
-    const suggested = items.filter((it) => !it.condition && it.suggestion).length;
+    const options = Statuses.statuses();
+    const top = document.createElement("div");
+    top.className = "status-map-bar";
+    const hint = document.createElement("span");
+    hint.className = "hint";
+    hint.textContent = Statuses.catalogLoaded()
+      ? `${options.filter((o) => o.named).length} TaleSpire statuses. Several conditions can share one.`
+      : Bridge.status.available
+        ? "Reading TaleSpire's statuses… open a board if this doesn't fill in."
+        : "With the bridge running the pickers list every TaleSpire status by name. Without it, only statuses seen on minis appear.";
+    top.appendChild(hint);
+    const items = Statuses.list();
+    const suggested = items.filter((it) => !it.emoteId && it.suggestion).length;
     if (suggested) {
-      const bar = document.createElement("div");
-      bar.className = "status-map-bar";
       const btn = document.createElement("button");
       btn.className = "btn btn-small btn-primary";
       btn.textContent = `Pair ${suggested} suggested`;
-      btn.title = "Pair every status whose name matches a condition";
+      btn.title = "Pair every condition with the status whose name matches it";
       btn.onclick = async () => {
         const n = await Statuses.acceptSuggestions();
-        toast(`Paired ${n} ${n === 1 ? "status" : "statuses"}.`);
+        toast(`Paired ${n} ${n === 1 ? "condition" : "conditions"}.`);
       };
-      bar.append(btn);
-      box.appendChild(bar);
+      top.appendChild(btn);
     }
+    if (Bridge.status.available) {
+      const reload = document.createElement("button");
+      reload.className = "btn btn-small";
+      reload.textContent = "Reload statuses";
+      reload.title = "Read TaleSpire's status list again";
+      reload.onclick = async () => {
+        const ok = await Statuses.loadCatalog({ force: true });
+        if (!ok) toast("Couldn't read TaleSpire's statuses. Open a board and try again (bridge 0.6.1 or later).", true);
+        else renderStatusMap();
+      };
+      top.appendChild(reload);
+    }
+    box.appendChild(top);
 
     for (const it of items) {
       const row = document.createElement("div");
@@ -3197,11 +3227,11 @@ const App = (() => {
       const label = document.createElement("div");
       label.className = "status-map-name";
       const title = document.createElement("span");
-      title.textContent = it.name || (it.names.length ? `Status on ${it.names.join(", ")}` : "Unnamed status");
+      title.textContent = it.condition;
       label.appendChild(title);
       const sub = [
-        it.name && it.names.length ? `on ${it.names.join(", ")}` : null,
-        !it.condition && it.suggestion ? `suggested: ${it.suggestion}` : null,
+        it.sharedWith.length ? `shared with ${it.sharedWith.join(", ")}` : null,
+        it.suggestion ? `suggested: ${it.suggestionName}` : null,
       ].filter(Boolean);
       if (sub.length) {
         const small = document.createElement("span");
@@ -3209,21 +3239,22 @@ const App = (() => {
         small.textContent = sub.join(" · ");
         label.appendChild(small);
       }
-      label.title = `Status ${it.emoteId}`;
       const pick = document.createElement("select");
-      pick.setAttribute("aria-label", `Condition for ${it.name || "this status"}`);
+      pick.id = `status-for-${it.condition.toLowerCase()}`;
+      pick.setAttribute("aria-label", `TaleSpire status for ${it.condition}`);
       const none = document.createElement("option");
       none.value = "";
-      none.textContent = "— not a condition";
+      none.textContent = "No status";
       pick.appendChild(none);
-      for (const name of CONDITION_NAMES) {
+      for (const o of options) {
         const opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = name;
+        opt.value = o.emoteId;
+        const others = o.conditions.filter((c) => c !== it.condition);
+        opt.textContent = others.length ? `${o.name} (also ${others.join(", ")})` : o.name;
         pick.appendChild(opt);
       }
-      pick.value = it.condition || "";
-      pick.onchange = () => Statuses.setMapping(it.emoteId, pick.value || null, true);
+      pick.value = it.emoteId || "";
+      pick.onchange = () => Statuses.setMapping(it.condition, pick.value || null, true);
       row.append(label, pick);
       box.appendChild(row);
     }
@@ -3601,11 +3632,7 @@ const App = (() => {
   // conditions live here. The import seeds them; after that the table owns them.
   // -------------------------------------------------------------------------
 
-  const CONDITION_NAMES = [
-    "Blinded", "Charmed", "Deafened", "Exhaustion", "Frightened", "Grappled",
-    "Incapacitated", "Invisible", "Paralyzed", "Petrified", "Poisoned", "Prone",
-    "Restrained", "Stunned", "Unconscious", "Concentrating", "Dodging", "Hidden",
-  ];
+  const CONDITION_NAMES = Statuses.CONDITIONS;
 
   function renderConditions() {
     const play = state.sheet.play;
@@ -3748,6 +3775,8 @@ const App = (() => {
   function pushConditionToBoard(name, on) {
     const emoteId = Statuses.emoteFor(name);
     if (!emoteId || !state.creatureId) return;
+    // A status shared with another condition you still have stays on the mini
+    if (!on && Statuses.conditionsFor(emoteId).some((c) => c !== name && state.sheet.play.conditions.some((x) => x.name === c))) return;
     if (Bridge.canWrite()) {
       Bridge.setEmote(state.creatureId, emoteId, on).then((r) => {
         if (!r.ok) toast(`Couldn't ${on ? "set" : "clear"} ${name} on the mini (${r.error}).`, true);
@@ -6393,13 +6422,19 @@ document.addEventListener("DOMContentLoaded", () => {
           return { ok: true };
         }
         if (path === "/statuses") {
-          // A stand-in for TaleSpire's emote catalog; e1 and e2 are on Kree
-          return { ok: true, statuses: [
-            { id: "e1", name: "Knocked down", icon: "knocked" },
-            { id: "e2", name: "Poisoned", icon: "poison" },
-            { id: "e3", name: "Bleeding", icon: "blood" },
-            { id: "e4", name: "Asleep", icon: "zzz" },
-            { id: "e5", name: "Burning", icon: "fire" },
+          // A stand-in for the radial menu's status list; e1 and e2 are on Kree
+          return { ok: true, fromMenu: 10, statuses: [
+            { id: "e1", name: "Knocked down", icon: "knocked", menu: true },
+            { id: "e2", name: "Poisoned", icon: "poison", menu: true },
+            { id: "e3", name: "Bleeding", icon: "blood", menu: true },
+            { id: "e4", name: "Asleep", icon: "zzz", menu: true },
+            { id: "e5", name: "Burning", icon: "fire", menu: true },
+            { id: "e6", name: "Dizzy", icon: "stars", menu: true },
+            { id: "e7", name: "Scared", icon: "fear", menu: true },
+            { id: "e8", name: "Charmed", icon: "hearts", menu: true },
+            { id: "e9", name: "Frozen", icon: "ice", menu: true },
+            { id: "e10", name: "Webbed", icon: "web", menu: true },
+            { id: "e11", name: "Skull", icon: "skull", menu: false },
           ] };
         }
         if (path === "/emote" && method === "POST") {

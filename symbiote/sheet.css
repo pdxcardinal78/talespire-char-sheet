@@ -1233,7 +1233,8 @@ textarea {
 .status-map-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 13px; }
 .status-map-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-map-name .sub { color: var(--fg-dim); font-size: 11px; }
-.status-map-bar { display: flex; justify-content: flex-end; margin-bottom: 2px; }
+.status-map-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-bottom: 4px; }
+.status-map-bar .hint { flex: 1 1 160px; margin: 0; font-size: 12px; }
 .cond-inline { color: var(--danger); }
 
 /* ---------- spell zones ---------- */

@@ -93,6 +93,7 @@ const GM = (() => {
           const st = Statuses.on(info);
           return {
             conditions: st.conditions,
+            shared: st.shared,
             unknownStatuses: st.unknown.length,
             unknownNames: st.unknown.map((id) => Statuses.nameOf(id)).filter(Boolean),
           };
@@ -227,7 +228,7 @@ const GM = (() => {
     // Conditions, from the statuses on the mini
     const writable = Boolean(deps.canWrite?.());
     const addable = writable ? (deps.conditionNames?.() || []).filter((n) => !row.conditions.includes(n)) : [];
-    if (row.conditions.length || row.unknownStatuses || addable.length) {
+    if (row.conditions.length || row.shared?.length || row.unknownStatuses || addable.length) {
       const conds = document.createElement("div");
       conds.className = "party-conds";
       for (const c of row.conditions) {
@@ -242,6 +243,24 @@ const GM = (() => {
           x.textContent = "×";
           x.title = `Clear ${c} from the mini`;
           x.onclick = () => deps.onCondition?.(row, c, false);
+          chip.appendChild(x);
+        }
+        conds.appendChild(chip);
+      }
+      // A status several conditions share: the board can't say which one
+      for (const sh of row.shared || []) {
+        const chip = document.createElement("span");
+        chip.className = "condition";
+        const label = document.createElement("span");
+        label.textContent = sh.conditions.join(" or ");
+        chip.appendChild(label);
+        chip.title = `TaleSpire status: ${sh.name}`;
+        if (writable) {
+          const x = document.createElement("button");
+          x.className = "chip-btn";
+          x.textContent = "×";
+          x.title = `Clear ${sh.name} from the mini`;
+          x.onclick = () => deps.onCondition?.(row, sh.conditions[0], false);
           chip.appendChild(x);
         }
         conds.appendChild(chip);

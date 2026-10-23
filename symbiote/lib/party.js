@@ -157,9 +157,9 @@ const Party = (() => {
 
   // --- statuses and conditions ---------------------------------------------
 
-  /** The GM sharing one status -> condition pairing (condition null clears it). */
-  async function statusMapping(emoteId, condition) {
-    await broadcast({ t: "sm", e: emoteId, c: condition });
+  /** The GM sharing one condition -> status pairing (status null clears it). */
+  async function conditionMapping(condition, emoteId) {
+    await broadcast({ t: "cm", c: condition, e: emoteId || null });
   }
 
   /** A panel that just opened asking the GM for every pairing. */
@@ -269,8 +269,11 @@ const Party = (() => {
       handlers.onTempGrant({ creatureId: msg.c, temp: msg.tp, source: msg.n });
     } else if (msg.t === "hit" && handlers.onHit) {
       handlers.onHit({ creatureId: msg.c, amount: msg.a, source: msg.n });
-    } else if (msg.t === "sm" && handlers.onStatusMapping) {
-      handlers.onStatusMapping({ emoteId: msg.e, condition: msg.c || null });
+    } else if (msg.t === "cm" && handlers.onStatusMapping) {
+      handlers.onStatusMapping({ condition: msg.c, emoteId: msg.e || null });
+    } else if (msg.t === "sm" && msg.c && handlers.onStatusMapping) {
+      // A GM panel older than 0.23 sends status -> condition
+      handlers.onStatusMapping({ condition: msg.c, emoteId: msg.e });
     } else if (msg.t === "smq" && handlers.onStatusRequest) {
       handlers.onStatusRequest();
     } else if (msg.t === "cnd" && handlers.onCondition) {
@@ -314,7 +317,7 @@ const Party = (() => {
 
   return {
     configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, tempGrant, saveSession, saveAck, saveQuery, saveResult, initiative,
-    statusMapping, requestStatusMappings, condition,
+    conditionMapping, requestStatusMappings, condition,
     zoneQuery, zoneReply, zoneKeep, zoneKept, zoneRemove,
     receive, reachablePlayers, MAX_MESSAGE,
   };

@@ -1038,33 +1038,44 @@ box is damage and takes temp first; `12` and `+3` never touch temp.
 ## TaleSpire statuses and conditions
 
 TaleSpire's radial-menu statuses (Knocked down and the rest) are persistent
-emotes, and the symbiote API reports them only as opaque ids. The bridge reads
-TaleSpire's own status catalog, so with it running the Party view lists every
-status by name under *TaleSpire statuses → conditions*, each with a condition
-picker, a note of which minis wear it right now, and a suggestion where the name
-matches a condition (Knocked down → Prone, Asleep → Unconscious). *Pair N
-suggested* takes all the suggestions at once. Without the bridge the list falls
-back to statuses seen on minis, named by the minis wearing them. Pairing a
-condition with a second status moves it over, so each condition has one status.
+emotes, and the symbiote API reports them only as opaque ids. The radial menu
+keeps its own list of statuses, and the bridge (0.6.1 or later) reads it, so
+every status has its name.
+
+The Party view's *Conditions → TaleSpire statuses* list has a row for every 5e
+condition, each with a picker of TaleSpire's statuses. TaleSpire has fewer
+statuses than 5e has conditions, so several conditions can share one: put
+Paralyzed and Stunned both on the same status, say. A row notes which other
+conditions share its status, and each picker option says which conditions it
+already stands for. Where a status's name matches a condition it's suggested
+(Knocked down → Prone, Asleep → Unconscious), and *Pair N suggested* takes all
+the suggestions at once. *Reload statuses* reads TaleSpire's list again, for
+when the bridge connected before a board was open. Without the bridge the
+pickers offer only statuses seen on minis, named by the minis wearing them.
 
 Status ids are TaleSpire's own content ids, the same in every campaign, so
 pairings live in the global library beside your characters and are set once for
-every campaign. Pairings made in 0.15.0, which kept them per campaign, move
-across on first load. The GM's panel shares them over sync; a player's panel
-asks for them when it opens.
+every campaign. Pairings from before 0.23 (each status pointing at one
+condition) are turned round on first load. The GM's panel shares them over
+sync; a player's panel asks for them when it opens.
 
-Once a status is paired, it works in both directions:
+Once a condition is paired, it works in both directions:
 
 - **Board → panel.** A player's sheet follows the statuses on its linked mini:
   set Knocked down from the radial menu and the sheet gains Prone, with its rules
-  text; clear it and Prone goes. The sheet only follows what changed on the
-  board, so conditions added in the panel are never wiped. Party rows show each
-  mini's conditions and how many statuses aren't paired yet, and fight rows show
-  a linked combatant's conditions beside its AC.
+  text; clear it and Prone goes. Pairing a status a mini already wears counts as
+  a change too. A shared status can't say which condition it means, so the
+  sheet asks you to add whichever applies rather than guessing; clearing a
+  shared status clears every condition it stands for. The sheet only follows
+  what changed on the board, so conditions added in the panel are never wiped.
+  Party rows show each mini's conditions (a shared status as "Paralyzed or
+  Stunned") and how many statuses aren't paired yet, and fight rows show a
+  linked combatant's conditions beside its AC.
 - **Panel → board.** Adding or removing a paired condition puts the status on
-  the mini or takes it off. A GM does it directly through the bridge, from their
-  own sheet or from *+ Condition* and `×` on a party row; a player's panel asks
-  the GM's bridge over sync, so it needs the GM's panel open.
+  the mini or takes it off. A shared status stays on while any of its
+  conditions does. A GM does it directly through the bridge, from their own
+  sheet or from *+ Condition* and `×` on a party row; a player's panel asks the
+  GM's bridge over sync, so it needs the GM's panel open.
 
 ## Spell zones
 
