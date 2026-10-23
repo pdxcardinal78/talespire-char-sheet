@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.17.4";
+  const APP_VERSION = "0.17.5";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1294,8 +1294,13 @@ const App = (() => {
     const card = $("zone-card");
     const z = zoneShown;
     card.classList.toggle("hidden", !z);
+    card.classList.toggle("is-min", Boolean(z?.min));
     card.replaceChildren();
-    if (!z) return;
+    if (!z) return padForZoneCard();
+    if (z.min) {
+      renderZoneStrip(card, z);
+      return padForZoneCard();
+    }
 
     const head = document.createElement("div");
     head.className = "zone-head";
@@ -1313,9 +1318,7 @@ const App = (() => {
     }
 
     // The GM's answer wins for a player: it saw every mini
-    const names = z.gmNames
-      ? z.gmNames
-      : z.inside.filter((c) => state.isGM || !c.hidden).map((c) => (state.isGM && c.hidden ? `${c.name} (hidden)` : c.name));
+    const names = zoneNames(z);
     const list = document.createElement("div");
     list.className = "zone-list";
     if (!names.length) {
@@ -1353,11 +1356,11 @@ const App = (() => {
       if (z.keep === "kept") keep.textContent = "Kept ✓";
       actions.appendChild(keep);
     }
-    actions.appendChild(button("Close", "btn-ghost", () => {
-      Zones.release(z.rulerId);
-      zoneShown = null;
+    actions.appendChild(button("Minimize", "btn-ghost", () => {
+      z.min = true;
       renderZoneCard();
     }));
+    actions.appendChild(button("Close", "btn-ghost", () => closeZoneCard(z)));
     card.appendChild(actions);
 
     // Keep's progress shows on the card itself: a toast would sit underneath it
@@ -1372,6 +1375,54 @@ const App = (() => {
       p.textContent = keepNote;
       card.appendChild(p);
     }
+    padForZoneCard();
+  }
+
+  function zoneNames(z) {
+    return z.gmNames
+      ? z.gmNames
+      : z.inside.filter((c) => state.isGM || !c.hidden).map((c) => (state.isGM && c.hidden ? `${c.name} (hidden)` : c.name));
+  }
+
+  /**
+   * The card shrunk to one line, so a kept zone keeps being tracked without
+   * covering the sheet. Tap it to open the card again.
+   */
+  function renderZoneStrip(card, z) {
+    const names = zoneNames(z);
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "zone-strip";
+    open.title = "Show the zone card";
+    const who = names.length ? names.join(", ") : z.awaitingGm ? "checking…" : "nobody inside";
+    open.innerHTML = `<strong>◎ ${escapeHtml(z.spell?.name || "Zone")}</strong>` +
+      `<span class="zone-strip-who">${names.length ? `${names.length}: ` : ""}${escapeHtml(who)}</span>`;
+    open.addEventListener("click", () => {
+      z.min = false;
+      renderZoneCard();
+    });
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "zone-strip-x";
+    close.title = "Stop tracking this zone (a kept marker stays on the board)";
+    close.setAttribute("aria-label", "Stop tracking this zone");
+    close.textContent = "×";
+    close.addEventListener("click", () => closeZoneCard(z));
+    card.append(open, close);
+  }
+
+  function closeZoneCard(z) {
+    Zones.release(z.rulerId);
+    if (zoneShown === z) zoneShown = null;
+    renderZoneCard();
+  }
+
+  /** Room at the bottom of the page so the card or strip never hides the last of the sheet. */
+  function padForZoneCard() {
+    const card = $("zone-card");
+    const h = card.classList.contains("hidden") ? 0 : card.offsetHeight;
+    document.body.style.paddingBottom = h ? `${h + 20}px` : "";
+    document.body.style.setProperty("--zone-card-h", `${h ? h + 8 : 0}px`); // toasts sit above it
   }
 
   /** Leave the placed ruler on the board as a TaleSpire area marker, via the GM's bridge. */
@@ -1411,7 +1462,10 @@ const App = (() => {
   }
 
   function keptOnCard(rulerId, zoneId) {
-    if (zoneShown && String(zoneShown.rulerId) === String(rulerId)) zoneShown.keptId = zoneId;
+    if (zoneShown && String(zoneShown.rulerId) === String(rulerId)) {
+      zoneShown.keptId = zoneId;
+      zoneShown.min = true; // kept: get out of the way, keep tracking
+    }
     setKeepState(rulerId, "kept");
   }
 

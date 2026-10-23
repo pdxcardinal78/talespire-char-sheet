@@ -383,7 +383,7 @@ textarea {
   position: fixed;
   left: 12px;
   right: 12px;
-  bottom: 12px;
+  bottom: calc(12px + var(--zone-card-h, 0px));
   background: var(--bg-3);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
@@ -1237,4 +1237,14 @@ textarea {
 .zone-chip { background: var(--bg-3); border-radius: var(--radius); padding: 2px 8px; }
 .zone-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .zone-keep { font-size: 12px; color: var(--fg-dim); margin: 6px 0 0; }
+.zone-card.is-min { display: flex; align-items: center; gap: 4px; padding: 4px 6px; }
+.zone-card.is-min.hidden { display: none; }
+.zone-strip {
+  flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 2px 4px;
+}
+.zone-strip strong { white-space: nowrap; }
+.zone-strip-who { color: var(--fg-dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zone-strip-x { background: none; border: 0; color: var(--fg-dim); font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 6px; }
+.zone-strip-x:hover, .zone-strip:hover strong { color: var(--fg); }
 .zone-keep.is-error { color: var(--danger); }

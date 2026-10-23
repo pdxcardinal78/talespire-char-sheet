@@ -978,7 +978,11 @@ and a card lists who's inside.
   and any error show on the card. Move the ruler after keeping it and Keep
   again to replace the marker. If the ruler has been put away, the GM's plugin
   builds the marker from the shape the card last saw.
-- **While the card is open** it re-checks once a second, so minis walking in or
+- **Out of the way.** Keeping a zone shrinks the card to a one-line strip at
+  the bottom (*Moonbeam · 2: Aranis, Doran*) that keeps updating; tap it for
+  the full card, or × to stop tracking (the marker stays). *Minimize* does the
+  same for a zone you haven't kept. The page leaves room so nothing is hidden.
+- **While the card or strip is open** it re-checks once a second, so minis walking in or
   out show up, and so does dragging a kept marker (TaleSpire doesn't tell
   symbiotes about markers; the GM's bridge reads them). A player's card asks
   the GM's panel every few seconds.
