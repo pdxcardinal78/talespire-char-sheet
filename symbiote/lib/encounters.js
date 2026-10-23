@@ -57,6 +57,8 @@ const Encounters = (() => {
         maxHp: monster.hp ?? null,
         hp: monster.hp ?? null,
         ac: monster.ac ?? null,
+        // Walking speed, for this monster's movement on its turn
+        speed: Number((/^(\d+)\s*ft/.exec(String(monster.speed || "")) || [])[1]) || null,
         creatureId: null,
         // Bundled monsters are looked up by slug; anything from Open5e has to
         // travel with the encounter or it would vanish offline.
@@ -380,6 +382,8 @@ const Encounters = (() => {
     }
     row.appendChild(hpBox);
 
+    row.appendChild(turnTools(c));
+
     const controls = el("div", "combatant-controls");
 
     const stat = el("button", "btn btn-small btn-ghost", "Stat");
@@ -398,6 +402,47 @@ const Encounters = (() => {
 
     row.appendChild(controls);
     return row;
+  }
+
+  /**
+   * A monster's turn tools: movement on its turn, and what lasts until its
+   * next one (a +AC like Shield, Dodge). The GM's own tracker, the same idea
+   * as a player's turn strip.
+   */
+  function turnTools(c) {
+    const box = el("div", "monster-turn");
+    const active = turnOrder().some((e) => e.active && e.combatant === c);
+    if (active) {
+      const t = c.turnState || { moved: 0, dashes: 0 };
+      const speed = (c.speed || 30) * (1 + (t.dashes || 0));
+      const move = el("span", `monster-move${t.moved > speed ? " is-over" : ""}`);
+      move.innerHTML = `<span class="badge">its turn</span> Moved <b>${t.moved || 0}</b> / ${speed} ft`;
+      box.appendChild(move);
+      for (const [label, op] of [["Dash", "dash"], ["−5", "less"], ["+5", "more"], ["reset", "reset"]]) {
+        const b = el("button", "link-btn", label);
+        b.onclick = () => deps.onMove?.(c, op);
+        box.appendChild(b);
+      }
+    }
+    const lasting = el("span", "monster-lasting");
+    const shield = el("button", `chip${c.acBonus?.amount === 5 ? " is-on" : ""}`, "Shield +5");
+    shield.title = "+5 AC until the start of its next turn";
+    shield.onclick = () => deps.onAcBonus?.(c, c.acBonus?.amount === 5 ? null : 5);
+    const custom = document.createElement("input");
+    custom.type = "number";
+    custom.className = "monster-ac-input";
+    custom.placeholder = "+AC";
+    custom.title = "A different AC bonus until its next turn; Enter to set";
+    custom.onkeydown = (ev) => {
+      if (ev.key === "Enter" && Number(custom.value)) deps.onAcBonus?.(c, Number(custom.value));
+    };
+    const dodge = el("button", `chip${c.dodge ? " is-on" : ""}`, c.dodge ? "Dodging" : "Dodge");
+    dodge.title = "Attacks against it have Disadvantage until its next turn";
+    dodge.onclick = () => deps.onDodge?.(c);
+    lasting.append(shield, custom, dodge);
+    if (c.acBonus) lasting.appendChild(el("span", "hint", `AC ${c.ac != null ? c.ac + c.acBonus.amount : `+${c.acBonus.amount}`} until its turn${c.acBonus.written ? " (on the mini)" : ""}`));
+    box.appendChild(lasting);
+    return box;
   }
 
   function renderTurnOrder(host) {
@@ -461,27 +506,53 @@ const Encounters = (() => {
     host.appendChild(list);
   }
 
+  /**
+   * Damage waiting for a target. With a combatant selected, each damage type
+   * gets Normal / Resist / Vuln / Immune, defaulting from its stat block (or a
+   * player's sheet), and the total follows (lib/damage.js).
+   */
   function renderInbox(host) {
     if (!inbox.length) return;
     const target = selected();
+    const def = target ? deps.defensesSync?.(target) : null;
 
     for (const entry of inbox) {
-      const row = el("div", "damage-offer");
-      row.appendChild(
-        el("span", "damage-offer-text", `${entry.who} rolled ${entry.amount}${entry.label ? ` — ${entry.label}` : ""}`)
-      );
-
-      const apply = el("button", "btn btn-small btn-primary", target ? `Apply to ${target.label}` : "Select a combatant");
-      apply.disabled = !target;
-      apply.onclick = () => deps.onApplyDamage(target, entry);
-      row.appendChild(apply);
-
+      const box = el("div", "damage-offer card");
+      const head = el("div", "damage-offer-head");
+      head.appendChild(el("span", "damage-offer-text", `${entry.who} rolled ${entry.amount}${entry.label ? ` · ${entry.label}` : ""}`));
       const no = el("button", "btn btn-small btn-ghost", "✕");
       no.title = "Dismiss";
       no.onclick = () => dismissDamage(entry.rollId);
-      row.appendChild(no);
+      head.appendChild(no);
+      box.appendChild(head);
 
-      host.appendChild(row);
+      const parts = entry.parts?.length ? entry.parts : [{ type: null, amount: entry.amount }];
+      entry.modes = entry.modes || {};
+      const result = Damage.apply(parts, target ? def : null, entry.modes);
+      if (target) {
+        for (const r of result.rows) {
+          const line = el("div", "damage-type-row");
+          line.appendChild(el("span", "damage-type-amount", `${r.amount} ${r.type || "untyped"}`));
+          const seg = el("span", "damage-modes");
+          for (const mode of Damage.MODES) {
+            const b = el("button", `damage-mode${r.mode === mode ? " is-on" : ""}`, { normal: "Normal", resist: "Resist", vuln: "Vuln", immune: "Immune" }[mode]);
+            b.onclick = () => {
+              entry.modes[r.type ?? ""] = mode;
+              render();
+            };
+            seg.appendChild(b);
+          }
+          line.appendChild(seg);
+          box.appendChild(line);
+        }
+        if (def?.qualified) box.appendChild(el("p", "hint", "Its stat block qualifies some defenses (nonmagical, silvered); check before applying."));
+      }
+
+      const apply = el("button", "btn btn-small btn-gold is-fill", target ? `Apply ${result.total} to ${target.label}` : "Select a combatant");
+      apply.disabled = !target;
+      apply.onclick = () => deps.onApplyDamage(target, entry, entry.modes);
+      box.appendChild(apply);
+      host.appendChild(box);
     }
   }
 
@@ -497,7 +568,14 @@ const Encounters = (() => {
 
     renderInbox(host);
 
-    host.appendChild(el("h3", "bestiary-heading", "Turn order"));
+    const orderHead = el("h3", "bestiary-heading", "Turn order");
+    if (deps.canRollInitiative?.()) {
+      const roll = el("button", "btn btn-small btn-gold", "Roll monster initiative");
+      roll.title = "Roll for every linked monster in one throw and sort them into TaleSpire's initiative";
+      roll.onclick = () => deps.onRollInitiative?.();
+      orderHead.appendChild(roll);
+    }
+    host.appendChild(orderHead);
     renderTurnOrder(host);
 
     host.appendChild(el("h3", "bestiary-heading", "Combatants"));

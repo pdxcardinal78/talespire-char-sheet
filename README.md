@@ -1127,6 +1127,64 @@ whose AC the GM can read (an *AC* or *Armor Class* stat), the panel calls it.
 Attacks against a target with no readable AC work as before: the result is
 posted and a person decides.
 
+## Saving throws
+
+Ask for a save and the table runs it, ZeroGear style (`lib/saves.js`):
+
+- **Asking.** A spell with a save gets *Request DEX saves* on its card, and a
+  zone card for it gets *Ask for saves*: everyone inside is asked. Without a
+  zone, it's the lassoed minis, then the target. A monster's save action in
+  the Monsters view gets the same button.
+- **Who rolls.** Player characters (minis a player owns) get a prompt on their
+  own panel, *Save asked: Dexterity save · Fireball*, with a Roll button. The DC
+  is never sent. Monsters roll on the GM's panel, all in one throw, with their
+  stat block's save bonus.
+- **The table** lives on the GM's panel: each creature, its total, SUCCESS or
+  FAIL against the DC (which the GM can change), and ✓ / ✗ to overrule
+  (Legendary Resistance, a ruling). A player's request goes there; if no GM
+  panel answers, it runs on the player's own panel and monsters are ✓ / ✗ by
+  hand.
+- **Damage** is rolled once. *Apply* gives each creature the full amount on a
+  fail and half on a success (when the spell says half), through its own
+  resistances, onto the board where it can. It's one undoable step.
+
+## Damage types and resistances
+
+Damage keeps its types (`lib/damage.js`): a weapon's dice and each rider are
+separate groups named like `Rapier damage [piercing]` and `Divine Smite
+[radiant]`, so the GM's panel can read the types off anyone's roll. Applying
+damage in Fights, each type gets Normal / Resist / Vuln / Immune, defaulting
+from the monster's stat block (a qualified one like "nonmagical" is flagged),
+and the total follows. Players' panels report their resistances with their
+vitals, so a GM's automated monster hit halves poison against a dwarf.
+
+## Range and reach
+
+With a target picked, the target line says how far it is (squares counted the
+5e way, edge to edge), and each attack card says whether the target is in
+reach, in range, at long range (Disadvantage) or out of it. A ranged attack
+with an enemy within 5 ft warns of Disadvantage; with the GM's bridge every
+non-party mini counts, without it only the target. An open spell says whether
+the target is within its range. Measurements follow the minis as they move.
+
+## The GM's monsters, turn by turn
+
+In Fights, the monster whose turn it is shows its movement (counted from its
+mini, with Dash, −5 / +5 and reset). Any monster can take *Shield +5* (or any
++AC) or *Dodge* until its next turn; when its next turn starts they end. With
+the bridge and an AC stat on its mini, the AC change goes onto the mini, so
+players' attack rolls see it, and comes off again.
+
+## Initiative into TaleSpire
+
+TaleSpire's initiative is an order with no numbers. With the bridge (plugin
+0.6.0), *Roll initiative* on a player's sheet sends the result to the GM's
+panel, which sorts TaleSpire's order by the numbers rolled this fight
+(highest first, ties to the higher Dexterity). Fights has *Roll monster
+initiative* for every linked monster in one throw. Minis already in the order
+without a number keep their places after. The numbers are forgotten when
+initiative ends.
+
 ## Known gaps
 
 These are deliberate omissions, not bugs to trip over later:

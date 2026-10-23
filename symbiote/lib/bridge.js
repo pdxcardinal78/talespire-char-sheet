@@ -182,6 +182,28 @@ const Bridge = (() => {
     }
   }
 
+  /** TaleSpire's initiative order: { items: [{ id, kind }], current } or null. */
+  async function initiative() {
+    if (!status.available) return null;
+    try {
+      const r = await transport("GET", "/initiative");
+      return r?.ok ? { items: r.items || [], current: r.current || null } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Set the order (creature ids, first to last). GM only. */
+  async function setInitiative(ids) {
+    if (!canWrite()) return { ok: false, error: "bridge unavailable" };
+    try {
+      const r = await transport("POST", "/initiative-set", { order: ids.join(",") });
+      return r?.ok ? { ok: true } : { ok: false, error: r?.error || "refused (the plugin may be older than 0.6.0)" };
+    } catch {
+      return { ok: false, error: "bridge unreachable" };
+    }
+  }
+
   /** Open TaleSpire's ruler as sphere, line, cone or box (the API has no box). Returns { ok, id }. */
   async function startRuler(kind) {
     if (!canWrite()) return { ok: false, error: "bridge unavailable" };
@@ -251,7 +273,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, onChange, useTransport,
+    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, initiative, setInitiative, onChange, useTransport,
     get status() { return status; },
   };
 })();

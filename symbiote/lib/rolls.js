@@ -62,8 +62,28 @@ const Rolls = (() => {
     // Damage rides along in the same throw so one set of dice answers
     // "did it hit" and "for how much". The label is overridable because not every
     // dice pool is damage — Divine Spark heals or harms on the same 1d8.
-    const damageName = spec.damageName || `${spec.name} damage`;
+    // A damage type rides in the group's name ("Rapier damage [piercing]"), so
+    // anyone reading the result can apply resistances per type (lib/damage.js).
+    const typed = (name, type) => (typeof Damage !== "undefined" ? Damage.groupName(name, type) : name);
+    const damageName = typed(spec.damageName || `${spec.name} damage`, spec.damageType);
     if (spec.damage) descriptors.push({ name: damageName, roll: spec.damage });
+    // More damage of other types in the same throw: a smite's radiant, Sneak Attack
+    const extraNames = [];
+    for (const x of spec.extraDamage || []) {
+      if (!x?.roll) continue;
+      const n = typed(x.name, x.type);
+      extraNames.push(n);
+      descriptors.push({ name: n, roll: x.roll });
+    }
+
+    // Independent groups in one throw, each read on its own: a row of monsters'
+    // saves (each "Goblin 2: Dexterity save"). Results come back in summary.groups.
+    const groupNames = [];
+    for (const g of spec.groups || []) {
+      if (!g?.roll) continue;
+      groupNames.push(g.name);
+      descriptors.push({ name: g.name, roll: g.roll });
+    }
 
     if (!descriptors.length) throw new Error("Nothing to roll.");
 
@@ -81,6 +101,8 @@ const Rolls = (() => {
       quiet,
       stagedAt: Date.now(),
       damageName,
+      extraNames,
+      groupNames,
       // Was the label supplied by the caller, or did we derive "<name> damage"?
       customDamageName: Boolean(spec.damageName),
       damageIncluded: Boolean(spec.damage),
@@ -100,6 +122,7 @@ const Rolls = (() => {
     const groups = payload.resultsGroups || [];
     const d20Groups = ctx.roll ? groups.filter((g) => g.name === ctx.name + label(ctx.mode)) : [];
     const damageGroups = groups.filter((g) => g.name === (ctx.damageName || `${ctx.name} damage`));
+    const extraGroups = groups.filter((g) => (ctx.extraNames || []).includes(g.name));
     const bonusNames = new Set((ctx.bonuses || []).map((b) => b.name));
     const bonusGroups = groups.filter((g) => bonusNames.has(g.name));
 
@@ -133,19 +156,39 @@ const Rolls = (() => {
       // Quiet rolls hid the raw result, so send back the group that survived —
       // along with the buff dice, which were never in the comparison.
       if (ctx.quiet) {
-        const keep = [d20Groups[keepIndex], ...bonusGroups, ...damageGroups];
+        const keep = [d20Groups[keepIndex], ...bonusGroups, ...damageGroups, ...extraGroups];
         const sent = await TS.dice.sendDiceResult(keep, payload.rollId);
         if (failed(sent)) console.error("[Spirekeeper] sendDiceResult failed", sent);
       }
     }
 
-    if (damageGroups.length) {
-      const value = await TS.dice.evaluateDiceResultsGroup(damageGroups[0]);
-      // A damage-only roll has no d20, so its buffs belong on the damage total.
-      summary.damage = failed(value) ? null : value + (d20Groups.length ? 0 : bonusTotal);
+    if (damageGroups.length || extraGroups.length) {
+      const typeOf = (g) => (typeof Damage !== "undefined" ? Damage.typeFromGroupName(g.name) : null);
+      const parts = [];
+      if (damageGroups.length) {
+        const value = await TS.dice.evaluateDiceResultsGroup(damageGroups[0]);
+        // A damage-only roll has no d20, so its buffs belong on the damage total.
+        if (!failed(value)) parts.push({ name: damageGroups[0].name, type: typeOf(damageGroups[0]), amount: value + (d20Groups.length ? 0 : bonusTotal) });
+      }
+      for (const g of extraGroups) {
+        const value = await TS.dice.evaluateDiceResultsGroup(g);
+        if (!failed(value)) parts.push({ name: g.name, type: typeOf(g), amount: value });
+      }
+      summary.damageParts = parts;
+      summary.damage = parts.length ? parts.reduce((t, p) => t + p.amount, 0) : null;
       // A custom group name means the pool isn't necessarily damage — Divine
       // Spark's 1d8 heals or harms — so don't assert which it was.
       summary.damageIsNamed = Boolean(ctx.customDamageName);
+    }
+
+    if ((ctx.groupNames || []).length) {
+      summary.groups = [];
+      for (const name of ctx.groupNames) {
+        const g = groups.find((x) => x.name === name);
+        if (!g) continue;
+        const value = await TS.dice.evaluateDiceResultsGroup(g);
+        summary.groups.push({ name, total: failed(value) ? null : value, natural: naturalD20(g) });
+      }
     }
 
     tracked.delete(payload.rollId);

@@ -60,6 +60,11 @@ const App = (() => {
       Party.configure({
         onGrant: onEffectGranted,
         onTempGrant,
+        onSaveSession,
+        onInitiative: ({ creatureId, value, dex }) => placeInInitiative([{ id: creatureId, value, dex }]),
+        onSaveAck,
+        onSaveQuery,
+        onSaveResult,
         onRevoke: onEffectRevoked,
         onAck: onEffectAck,
         onVitals: onVitalsFromPlayer,
@@ -155,7 +160,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.21.0";
+  const APP_VERSION = "0.22.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -358,18 +363,23 @@ const App = (() => {
     const groups = payload.resultsGroups || [];
     if (!groups.length) return;
 
-    const named = groups.filter((g) => /damage/i.test(g.name || ""));
+    // Spirekeeper names typed groups "Rapier damage [piercing]", "Divine Smite [radiant]"
+    const named = groups.filter((g) => /damage/i.test(g.name || "") || Damage.typeFromGroupName(g.name));
     const use = named.length ? named : groups;
 
     let amount = 0;
+    const parts = [];
     for (const g of use) {
       const value = await TS.dice.evaluateDiceResultsGroup(g);
-      if (!failed(value)) amount += value;
+      if (failed(value)) continue;
+      amount += value;
+      parts.push({ name: g.name, type: Damage.typeFromGroupName(g.name), amount: value });
     }
     if (!amount) return;
 
     offerDamageToFight({
       rollId: payload.rollId,
+      parts,
       amount,
       label: use[0]?.name || null,
       who: await rollerName(payload.clientId),
@@ -448,15 +458,33 @@ const App = (() => {
   }
 
   /** Take an offered roll and spend it on the selected combatant. */
-  async function applyOfferedDamage(combatant, entry) {
+  async function applyOfferedDamage(combatant, entry, modes = {}) {
     if (!combatant) return;
     const onBoard = Encounters.hpFor(combatant).source === "board";
     if (onBoard && !writesBoard(combatant)) {
       return toast("This mini's hit points live on the board — change them there.", true);
     }
-    if (!(await setCombatantHp(combatant, `-${entry.amount}`))) return;
+    const def = await defensesForCombatant(combatant);
+    const { total, rows } = Damage.apply(entry.parts?.length ? entry.parts : [{ type: null, amount: entry.amount }], def, modes);
+    const changed = rows.filter((r) => r.mode !== "normal").map((r) => `${r.type} ${r.mode === "resist" ? "halved" : r.mode === "vuln" ? "doubled" : "immune"}`);
+    if (!(await undoable(`${total} damage to ${combatant.label}`, () => setCombatantHp(combatant, `-${total}`)))) return;
     Encounters.dismissDamage(entry.rollId);
-    toast(`${entry.amount} damage to ${combatant.label}.`);
+    toast(`${total} damage to ${combatant.label}${changed.length ? ` (${changed.join(", ")})` : ""}.`);
+  }
+
+  const combatantDefenses = new Map(); // combatant id -> defenses, for the Fights inbox
+
+  /** A combatant's damage defenses: its stat block's, or a player's reported sheet. */
+  async function defensesForCombatant(combatant) {
+    if (combatant?.slug || combatant?.cached) {
+      try {
+        const m = combatant.cached || (await Monsters.get(combatant.slug));
+        if (m?.defenses) return Damage.defensesOf(m.defenses);
+      } catch {
+        /* no stat block: no defaults */
+      }
+    }
+    return (combatant?.creatureId && Vitals.reportedFor(combatant.creatureId)?.defenses) || null;
   }
 
   /** Can this combatant's HP go straight onto its mini? Needs the bridge and a link. */
@@ -747,12 +775,13 @@ const App = (() => {
         roll: spec.roll,
         damage: spec.damage,
         damageName: spec.damageName,
+        damageType: spec.damageType || null,
         mode: modeFromEvent(ev),
         // monster + damageExpr let a GM's attack against a target with a known
         // AC resolve itself; see resolveMonsterAttack
         context: {
           kind: spec.kind, creatureId: state.speaker?.id || null, target: state.target,
-          monster: true, damageExpr: spec.damage || null, source: spec.name,
+          monster: true, damageExpr: spec.damage || null, damageType: spec.damageType || null, source: spec.name,
         },
       });
       renderStaged();
@@ -1150,8 +1179,9 @@ const App = (() => {
 
   function describeExpiry(fx) {
     const x = fx.expires;
-    const mine = x.of == null || x.of === state.creatureId;
-    return Turns.describe(x, mine ? null : fx.fromName || "the caster", turnSeen?.active === (x.of ?? state.creatureId));
+    const me = myQueueId();
+    const mine = x.of == null || x.of === state.creatureId || x.of === me;
+    return Turns.describe(x, mine ? null : fx.fromName || "the caster", turnSeen?.active != null && turnSeen.active === (x.of ?? me));
   }
 
   // -------------------------------------------------------------------------
@@ -1167,6 +1197,20 @@ const App = (() => {
   let tileFeet = null;
 
   const activeTurnFor = () => turnSeen?.active ?? null;
+
+  /**
+   * This sheet's entry in TaleSpire's initiative queue. The entry's id is
+   * meant to be the creature's, but TaleSpire doesn't promise it (the Fights
+   * view found they differ), so the linked mini's name is the fallback.
+   */
+  let linkedName = null;
+  function myQueueId(queue = turnQueue) {
+    if (!state.creatureId || !queue?.items?.length) return null;
+    if (queue.items.some((i) => i.id === state.creatureId)) return state.creatureId;
+    const n = String(linkedName || "").trim().toLowerCase();
+    const byName = n ? queue.items.find((i) => String(i.name || "").trim().toLowerCase() === n) : null;
+    return byName?.id || null;
+  }
 
   async function feetPerTile() {
     if (tileFeet) return tileFeet;
@@ -1196,12 +1240,108 @@ const App = (() => {
       }
       if (boundaries.length || combatOver) savePlay();
     }
+    if (boundaries.length && state.isGM) gmBoundaries(boundaries).catch((e) => console.error("[Spirekeeper] monster turn", e));
+    if (combatOver) clearInitiativeValues();
     renderTurnBar();
+  }
+
+  /**
+   * The GM's monsters at a turn boundary: when one's turn starts, its movement
+   * resets and whatever lasted "until its next turn" (an AC bonus, Dodge) ends.
+   */
+  async function gmBoundaries(boundaries) {
+    const enc = Encounters.current;
+    if (!enc) return;
+    // The Fights view hears about the queue after the sheet does; catch it up first
+    Encounters.setQueue(turnQueue);
+    const order = Encounters.turnOrder();
+    let changed = false;
+    for (const b of boundaries) {
+      if (b.at !== "start") continue;
+      const c = order.find((e) => e.id === b.of)?.combatant;
+      if (!c) continue;
+      changed = true;
+      let pos = null;
+      if (c.creatureId) {
+        try {
+          pos = (await Board.oneCreature(c.creatureId))?.position || null;
+        } catch {
+          /* counted from its first move */
+        }
+      }
+      c.turnState = { moved: 0, dashes: 0, lastPos: pos };
+      const ended = [];
+      if (c.acBonus) {
+        ended.push(`+${c.acBonus.amount} AC`);
+        await setMonsterAcBonus(c, null);
+      }
+      if (c.dodge) {
+        ended.push("Dodge");
+        c.dodge = false;
+      }
+      if (ended.length) toast(`${c.label}'s turn: ${ended.join(", ")} ended.`);
+    }
+    if (changed) {
+      await saveCurrentEncounter();
+      Encounters.render();
+    }
+  }
+
+  /** A monster's mini moved: count it if it's that monster's turn. */
+  async function trackMonsterMove(creatureId) {
+    const entry = Encounters.turnOrder().find((e) => e.active && e.combatant?.creatureId === creatureId);
+    const c = entry?.combatant;
+    if (!c) return;
+    let pos = null;
+    try {
+      pos = (await Board.oneCreature(creatureId))?.position || null;
+    } catch {
+      return;
+    }
+    if (!pos) return;
+    const t = (c.turnState ||= { moved: 0, dashes: 0, lastPos: null });
+    if (t.lastPos) {
+      const tiles = Turns.tilesBetween(t.lastPos, pos);
+      if (tiles) t.moved += tiles * (await feetPerTile());
+    }
+    t.lastPos = pos;
+    await saveCurrentEncounter();
+    Encounters.render();
+  }
+
+  /**
+   * An AC bonus until the monster's next turn. With the bridge and an AC stat
+   * on its mini, the stat itself goes up, so players' attack rolls see it,
+   * and comes back down when the bonus ends.
+   */
+  async function setMonsterAcBonus(c, n) {
+    const prev = c.acBonus;
+    if (prev?.written) {
+      await Bridge.setStat(c.creatureId, prev.written.index, prev.written.before, prev.written.max);
+    }
+    c.acBonus = null;
+    if (n) {
+      c.acBonus = { amount: n };
+      if (c.creatureId && Bridge.canWrite()) {
+        try {
+          const info = await Board.oneCreature(c.creatureId);
+          const st = Vitals.findStat(info?.stats, Vitals.AC_NAME);
+          if (st && st.value != null) {
+            const r = await Bridge.setStat(c.creatureId, st.index, st.value + n, Math.max(st.max || 0, st.value + n));
+            if (r.ok) c.acBonus.written = { index: st.index, before: st.value, max: st.max };
+          }
+        } catch {
+          /* panel only */
+        }
+      }
+    }
+    await saveCurrentEncounter();
+    Encounters.render();
   }
 
   async function runBoundaries(boundaries) {
     const play = state.sheet.play;
-    const me = state.creatureId;
+    const me = myQueueId();
     const ended = [];
     for (const b of boundaries) {
       queueRecurPrompts(b, me);
@@ -1239,7 +1379,8 @@ const App = (() => {
   }
 
   function isMyTurn() {
-    return Boolean(state.creatureId) && turnSeen?.active === state.creatureId;
+    const me = myQueueId();
+    return Boolean(me) && turnSeen?.active === me;
   }
 
   function currentSpeed() {
@@ -1278,7 +1419,7 @@ const App = (() => {
 
   function renderTurnBar() {
     const bar = $("turn-bar");
-    const inQueue = Boolean(state.sheet && state.creatureId && (turnQueue?.items || []).some((i) => i.id === state.creatureId));
+    const inQueue = Boolean(state.sheet && myQueueId());
     bar.classList.toggle("hidden", !inQueue);
     bar.replaceChildren();
     renderCombatCard();
@@ -1441,6 +1582,366 @@ const App = (() => {
       tempFor: recipient?.id || state.creatureId,
       tempName: recipient?.name || "you",
       source: fx.name,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Saving throws (see lib/saves.js)
+  // -------------------------------------------------------------------------
+
+  const saveSessions = []; // run on this panel
+  const savePrompts = []; // saves asked of this sheet: { id, creatureId, ability, name }
+  const pendingAsks = new Map(); // a player's request waiting for the GM's panel
+
+  /**
+   * Who's a player character: a mini owned by someone other than the GM.
+   * Monsters get their stat block's save bonus when they're in the fight.
+   */
+  async function classifyCreatures(creatures, ability) {
+    const ids = creatures.map((c) => c.id).filter(Boolean);
+    let infos = [];
+    try {
+      infos = await Board.creatureInfo(ids);
+    } catch {
+      /* treat everyone as a monster */
+    }
+    const rows = [];
+    for (const c of creatures) {
+      const info = infos.find((i) => i?.id === c.id);
+      const owners = (info?.ownerIds || []).filter((o) => o !== state.me?.id);
+      const combatant = (Encounters.current?.combatants || []).find((x) => x.creatureId === c.id) || null;
+      const pc = owners.length > 0 && !combatant;
+      let bonus = null;
+      if (!pc && combatant) {
+        try {
+          const m = combatant.cached || (await Monsters.get(combatant.slug));
+          bonus = m?.abilities?.[ability]?.save ?? null;
+        } catch {
+          /* no stat block */
+        }
+      }
+      rows.push({ id: c.id, name: combatant?.label || c.name || info?.name || "Unnamed", kind: pc ? "pc" : "monster", bonus, combatantId: combatant?.id || null, hidden: Boolean(c.hidden) });
+    }
+    return rows;
+  }
+
+  /**
+   * Ask for saves. On the GM's panel the table opens here; a player's panel
+   * sends the request to the GM's and runs it itself only if none answers.
+   */
+  async function requestSaves({ name, ability, dc, damage = null, half = true, creatures = [], zone = null }) {
+    if (!creatures.length && !zone) return toast("Place the zone or lasso the targets first.", true);
+    const session = Saves.create({ name, ability, dc, damage, half });
+    if (!state.isGM) {
+      const ask = { session, creatures };
+      pendingAsks.set(session.id, ask);
+      try {
+        await Party.saveSession(session, creatures.map((c) => c.id), zone);
+      } catch (e) {
+        pendingAsks.delete(session.id);
+        return toast(`Couldn't reach the table: ${e.message}`, true);
+      }
+      toast(`Asked the GM's panel to run the ${Saves.ABILITIES[session.ability]} save…`);
+      ask.timer = setTimeout(() => {
+        if (!pendingAsks.has(session.id)) return;
+        pendingAsks.delete(session.id);
+        toast("No GM panel answered, so the save runs here. Enter monsters' results with ✓ / ✗.");
+        runSession(session, creatures);
+      }, 3000);
+      return;
+    }
+    await runSession(session, creatures);
+  }
+
+  async function runSession(session, creatures) {
+    const rows = await classifyCreatures(creatures, session.ability);
+    Saves.addRows(session, rows);
+    if (!saveSessions.includes(session)) saveSessions.unshift(session);
+    renderSaveSessions();
+    const ability = Saves.ABILITIES[session.ability];
+    for (const r of rows) {
+      if (r.kind !== "pc") continue;
+      if (r.id === state.creatureId) onSaveQuery({ id: session.id, creatureId: r.id, ability: session.ability, name: session.name });
+      else await Party.saveQuery(session.id, r.id, session.ability, session.name).catch(() => {});
+    }
+    // The DC stays off the chat: it's the GM's to reveal
+    const who = rows.filter((r) => !r.hidden).map((r) => r.name);
+    if (who.length) await postChat(`${Rolls.bold(session.name)}: ${escapeText(ability)} save for ${escapeText(who.join(", "))}`, null);
+  }
+
+  /** The GM's panel receiving a player's request. */
+  async function onSaveSession(msg) {
+    if (!state.isGM) return;
+    let session = saveSessions.find((x) => x.id === msg.id);
+    if (!session) session = Saves.create({ id: msg.id, name: msg.name, ability: msg.ability, dc: msg.dc, damage: msg.damage, half: msg.half, from: "player" });
+    let creatures = [];
+    if (msg.zone) creatures = await zoneCreaturesFor(msg.zone);
+    if (msg.creatureIds?.length) {
+      let infos = [];
+      try {
+        infos = await Board.creatureInfo(msg.creatureIds);
+      } catch {
+        /* names unknown */
+      }
+      creatures.push(...msg.creatureIds.map((id) => ({ id, name: infos.find((i) => i?.id === id)?.name || "Unnamed" })));
+    }
+    await Party.saveAck(msg.id).catch(() => {});
+    await runSession(session, creatures);
+  }
+
+  /** Who's inside a player's zone, as the GM's panel sees it: { r: rulerId, k: keptZoneId, sh, sz } */
+  async function zoneCreaturesFor(zone) {
+    let ruler = null;
+    if (zone.k) {
+      const info = await Bridge.zoneInfo(zone.k);
+      if (info && !info.gone) ruler = Zones.rulerFromMarker(info, zone.r || zone.k);
+    }
+    if (!ruler && zone.r) {
+      try {
+        const infos = await TS.rulers.getMoreInfo([String(zone.r)]);
+        ruler = Array.isArray(infos) ? infos.find((x) => String(x?.id) === String(zone.r)) || null : null;
+      } catch {
+        ruler = null;
+      }
+    }
+    if (!ruler) return [];
+    const result = await Zones.check(zone.sh || Zones.shapeOfRuler(ruler), ruler, { area: zone.sz ? { shape: zone.sh, size: zone.sz } : null });
+    return result.inside;
+  }
+
+  function onSaveAck({ id }) {
+    const ask = pendingAsks.get(id);
+    if (!ask) return;
+    clearTimeout(ask.timer);
+    pendingAsks.delete(id);
+    toast("The GM's panel is running the save.");
+  }
+
+  function onSaveQuery({ id, creatureId, ability, name }) {
+    if (!state.sheet || creatureId !== state.creatureId) return;
+    if (savePrompts.some((p) => p.id === id)) return;
+    savePrompts.push({ id, creatureId, ability, name });
+    renderSavePrompts();
+    toast(`${Saves.ABILITIES[ability] || "A"} save asked for: ${name}.`);
+  }
+
+  function onSaveResult({ id, creatureId, total, natural }) {
+    const session = saveSessions.find((x) => x.id === id);
+    if (!session) return;
+    Saves.record(session, creatureId, total, natural);
+    renderSaveSessions();
+  }
+
+  /** This sheet's save, rolled with its own bonus. */
+  function rollSavePrompt(p, mode) {
+    const sv = (state.sheet.savingThrows || []).find((x) => Saves.abilityKey(x.name) === p.ability);
+    const bonus = sv?.value ?? state.sheet.abilities?.[p.ability]?.mod ?? 0;
+    savePrompts.splice(savePrompts.indexOf(p), 1);
+    renderSavePrompts();
+    return doRoll({
+      name: `${Saves.ABILITIES[p.ability]} save (${p.name})`,
+      roll: `d20${DDB.signed(bonus)}`,
+      mode,
+      kind: "save",
+      saveFor: { session: p.id, creatureId: p.creatureId },
+    });
+  }
+
+  function renderSavePrompts() {
+    const box = $("save-prompts");
+    box.replaceChildren();
+    box.classList.toggle("hidden", !savePrompts.length);
+    for (const p of savePrompts) {
+      const card = document.createElement("div");
+      card.className = "save-prompt card";
+      card.innerHTML = `<span class="save-prompt-text"><b>Save asked:</b> ${escapeHtml(Saves.ABILITIES[p.ability])} save · ${escapeHtml(p.name)}</span>`;
+      card.appendChild(button("Roll", "btn-gold is-fill", (mode) => rollSavePrompt(p, mode)));
+      card.appendChild(button("✕", "btn-ghost", () => {
+        savePrompts.splice(savePrompts.indexOf(p), 1);
+        renderSavePrompts();
+      }));
+      box.appendChild(card);
+    }
+  }
+
+  /** Monsters' saves in one throw, one d20 group each. */
+  async function rollMonsterSaves(session) {
+    const rows = session.rows.filter((r) => r.kind === "monster" && r.total == null);
+    if (!rows.length) return;
+    const ability = Saves.ABILITIES[session.ability];
+    const groupIds = {};
+    const groups = rows.map((r, i) => {
+      const name = `${r.name}${rows.filter((x) => x.name === r.name).length > 1 ? ` #${i + 1}` : ""}: ${ability} save`;
+      groupIds[name] = r.id;
+      return { name, roll: `d20${DDB.signed(r.bonus ?? 0)}` };
+    });
+    try {
+      await Rolls.stage({ name: `${session.name}: monster saves`, groups, context: { kind: "saveGroup", saveSession: session.id, groupIds } });
+      renderStaged();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  /** Each creature's damage: full on a fail, half on a success, then its defenses. */
+  async function applySaveDamage(session) {
+    if (!session.rolled) return;
+    const lines = [];
+    const notes = [];
+    await undoable(`${session.name} damage`, async () => {
+      for (const row of session.rows) {
+        const parts = Saves.damageFor(session, row);
+        if (!parts) continue;
+        const combatant = row.combatantId ? (Encounters.current?.combatants || []).find((c) => c.id === row.combatantId) : null;
+        const def = combatant ? await defensesForCombatant(combatant) : Vitals.reportedFor(row.id)?.defenses || null;
+        const { total, rows: typed } = Damage.apply(parts, def);
+        const changed = typed.filter((t) => t.mode !== "normal").map((t) => `${t.type} ${t.mode === "resist" ? "resisted" : t.mode === "vuln" ? "doubled" : "immune"}`);
+        if (total <= 0) {
+          lines.push(`${row.name} ${row.pass ? "saved" : "failed"}, no damage${changed.length ? ` (${changed.join(", ")})` : ""}`);
+          continue;
+        }
+        if (combatant) {
+          await setCombatantHp(combatant, `-${total}`);
+        } else if (row.id === state.creatureId && state.sheet) {
+          applyHp(-total);
+        } else if (row.kind === "monster" && !Bridge.canWrite()) {
+          notes.push(`${row.name}: apply ${total} by hand`);
+        } else {
+          await applyMonsterDamage({ id: row.id, name: row.name }, total, session.name, null, false, changed.join(", "));
+          continue; // it posted its own line
+        }
+        lines.push(`${row.name} ${row.pass ? "saved" : "failed"}: ${total}${changed.length ? ` (${changed.join(", ")})` : ""}`);
+      }
+      session.applied = true;
+    });
+    if (lines.length) await postChat(`${Rolls.bold(session.name)}: ${escapeText(lines.join("; "))}`, null);
+    if (notes.length) toast(notes.join(". "), true);
+    renderSaveSessions();
+  }
+
+  function renderSaveSessions() {
+    const box = $("save-sessions");
+    box.replaceChildren();
+    box.classList.toggle("hidden", !saveSessions.length);
+    for (const session of saveSessions) {
+      const card = document.createElement("div");
+      card.className = "save-session card";
+      const head = document.createElement("div");
+      head.className = "save-head";
+      head.innerHTML = `<b>${escapeHtml(Saves.ABILITIES[session.ability])} save · ${escapeHtml(session.name)}</b>`;
+      const dc = document.createElement("input");
+      dc.type = "number";
+      dc.className = "save-dc";
+      dc.value = session.dc ?? "";
+      dc.placeholder = "DC";
+      dc.title = "The DC; players never see it";
+      dc.onchange = () => {
+        Saves.setDc(session, dc.value);
+        renderSaveSessions();
+      };
+      const dcLabel = document.createElement("label");
+      dcLabel.className = "save-dc-label";
+      dcLabel.append("DC ", dc);
+      const done = session.rows.filter((r) => r.pass != null).length;
+      const count = document.createElement("span");
+      count.className = "save-count";
+      count.textContent = `${done}/${session.rows.length}`;
+      const close = button("✕", "btn-ghost", () => {
+        saveSessions.splice(saveSessions.indexOf(session), 1);
+        renderSaveSessions();
+      });
+      close.title = "Close";
+      head.append(dcLabel, count, close);
+      card.appendChild(head);
+      if (session.damage) {
+        const sub = document.createElement("p");
+        sub.className = "hint save-sub";
+        sub.textContent = `Fail: ${session.damage.expr}${session.damage.type ? ` ${session.damage.type}` : ""} · Success: ${session.half ? "half damage" : "no damage"}`;
+        card.appendChild(sub);
+      }
+
+      const list = document.createElement("div");
+      list.className = "save-rows";
+      for (const r of session.rows) {
+        const row = document.createElement("div");
+        row.className = "save-row";
+        const verdict = r.pass == null ? "" : r.pass ? '<span class="save-pass">SUCCESS</span>' : '<span class="save-fail">FAIL</span>';
+        row.innerHTML =
+          `<span class="save-who">${r.kind === "monster" ? '<i class="save-kind">M</i>' : ""}${escapeHtml(r.name)}${r.hidden ? ' <small>(hidden)</small>' : ""}</span>` +
+          `<span class="save-total">${r.total != null ? `<b>${r.total}</b>` : r.kind === "pc" ? '<span class="hint">waiting…</span>' : r.bonus != null ? `<span class="hint">${DDB.signed(r.bonus)}</span>` : '<span class="hint">no stat block</span>'}</span>` +
+          `<span class="save-verdict">${verdict}</span>`;
+        for (const [label, val] of [["✓", true], ["✗", false]]) {
+          const b = document.createElement("button");
+          b.className = `save-mark${r.manual && r.pass === val ? " is-on" : ""}`;
+          b.textContent = label;
+          b.title = val ? "Count it as a success" : "Count it as a failure";
+          b.onclick = () => {
+            Saves.override(session, r.id, r.manual && r.pass === val ? null : val);
+            renderSaveSessions();
+          };
+          row.appendChild(b);
+        }
+        list.appendChild(row);
+      }
+      card.appendChild(list);
+
+      const actions = document.createElement("div");
+      actions.className = "save-actions";
+      if (session.rows.some((r) => r.kind === "monster" && r.total == null && r.pass == null)) {
+        actions.appendChild(button("Roll monsters", "btn-gold", () => rollMonsterSaves(session)));
+      }
+      if (session.damage && !session.rolled) {
+        actions.appendChild(button(`Roll ${session.damage.expr}`, "btn-gold", (mode) =>
+          doRoll({ name: `${session.name} damage`, damage: session.damage.expr, damageType: session.damage.type, mode, kind: "saveDamage", saveSession: session.id })));
+      }
+      if (session.rolled && !session.applied) {
+        const apply = button(`Apply ${session.rolled.total}${session.half ? " (half on a save)" : ""}`, "btn-gold is-fill", () => applySaveDamage(session));
+        apply.disabled = !session.rows.some((r) => r.pass != null);
+        actions.appendChild(apply);
+      }
+      if (session.applied) {
+        const note = document.createElement("span");
+        note.className = "hint";
+        note.textContent = "Applied. ↶ Undo in Recent events reverses it.";
+        actions.appendChild(note);
+      }
+      card.appendChild(actions);
+      box.appendChild(card);
+    }
+  }
+
+  /** The creatures a save is for: the open zone of this spell, else the lasso, else the target. */
+  async function saveTargets(spellName) {
+    if (zoneShown && zoneShown.spell?.name === spellName) {
+      if (state.isGM) return { creatures: zoneShown.inside };
+      return { creatures: [], zone: { r: zoneShown.rulerId, k: zoneShown.keptId || null, sh: zoneShown.shape, sz: zoneShown.area?.size || null } };
+    }
+    try {
+      const sel = await TS.creatures.getSelectedCreatures();
+      const ids = Array.isArray(sel) ? sel.map((x) => x.id || x) : [];
+      if (ids.length) {
+        const infos = await Board.creatureInfo(ids);
+        return { creatures: ids.map((id) => ({ id, name: infos.find((i) => i?.id === id)?.name || "Unnamed" })) };
+      }
+    } catch {
+      /* no selection */
+    }
+    if (state.target) return { creatures: [{ id: state.target.id, name: state.target.name }] };
+    return { creatures: [] };
+  }
+
+  /** A spell's save, with its damage at the level cast. */
+  async function requestSpellSaves(sp, block, level) {
+    const rolls = DDB.upcastRolls(sp, level || sp.level);
+    const half = /half as much damage|half damage/i.test(sp.description || "");
+    const targets = await saveTargets(sp.name);
+    await requestSaves({
+      name: sp.name,
+      ability: sp.saveAbility,
+      dc: block?.saveDc,
+      damage: rolls.damage ? { expr: rolls.damage, type: Damage.typeOf(sp.damage?.[0]?.type) } : null,
+      half,
+      ...targets,
     });
   }
 
@@ -1871,6 +2372,12 @@ const App = (() => {
 
     const actions = document.createElement("div");
     actions.className = "zone-actions";
+    if (z.spell?.requiresSavingThrow && (z.inside.length || !state.isGM)) {
+      const block = (state.sheet?.spellcasting?.blocks || []).find((b) => b.ability) || null;
+      const ask = button("Ask for saves", "btn-gold", () => requestSpellSaves(z.spell, block, z.spell.level));
+      ask.title = "Everyone inside rolls the save; players never see the DC";
+      actions.appendChild(ask);
+    }
     if (names.length) {
       actions.appendChild(button("Post to chat", "", () =>
         announce(`${Rolls.bold(z.spell?.name || "Zone")}: ${names.filter((n) => !/\(hidden\)$/.test(n)).join(", ") || "nobody"} inside`)));
@@ -2145,7 +2652,7 @@ const App = (() => {
 
     if (reachable.length) {
       try {
-        await Party.grant(fx, reachable.map((r) => r.id), { ...state.me, creatureId: fx.expires?.of ?? state.creatureId });
+        await Party.grant(fx, reachable.map((r) => r.id), { ...state.me, creatureId: fx.expires?.of ?? myQueueId() ?? state.creatureId });
       } catch (e) {
         toast(`Could not send: ${e.message}`, true);
         for (const r of fx.grantedTo) if (r.status === "pending") r.status = "failed";
@@ -2525,7 +3032,7 @@ const App = (() => {
     vitalsTimer = setTimeout(() => {
       const s = state.sheet;
       if (!s || state.creatureId !== creatureId) return;
-      Party.reportVitals(creatureId, s.play.hp.current, effectiveMaxHp(s), s.play.hp.temp || 0)
+      Party.reportVitals(creatureId, s.play.hp.current, effectiveMaxHp(s), s.play.hp.temp || 0, Damage.pack(Damage.defensesOf(s.defenses)))
         .catch((e) => console.warn("[Spirekeeper] vitals report", e.message));
     }, 300);
   }
@@ -2547,6 +3054,7 @@ const App = (() => {
       return;
     }
     if (!info) return;
+    linkedName = info.name || linkedName;
     trackMovement(info.position);
     const hasHp = Boolean(info.hp && info.hp.max > 0);
     const tempStat = Vitals.tempStatOf(info);
@@ -2603,7 +3111,7 @@ const App = (() => {
    * bigger pool wins, same as granting it yourself.
    */
   function onTempGrant({ creatureId, temp, source }) {
-    if (!state.sheet || creatureId !== state.creatureId) return;
+    if (!state.sheet || (creatureId !== state.creatureId && creatureId !== myQueueId())) return;
     const n = Math.max(0, Math.round(Number(temp) || 0));
     if (n > (state.sheet.play.hp.temp || 0)) {
       grantTempHp(n);
@@ -2722,9 +3230,9 @@ const App = (() => {
   }
 
   /** A player's panel reported its vitals; as GM, keep the mini in step. */
-  async function onVitalsFromPlayer({ creatureId, hp, max, temp }) {
+  async function onVitalsFromPlayer({ creatureId, hp, max, temp, defenses }) {
     if (!state.isGM || !creatureId) return;
-    Vitals.report(creatureId, { hp, max, temp });
+    Vitals.report(creatureId, { hp, max, temp, defenses: defenses != null ? Damage.unpack(defenses) : Vitals.reportedFor(creatureId)?.defenses || null });
     GM.refresh();
     if (!Bridge.canWrite()) return;
     let info;
@@ -3070,11 +3578,16 @@ const App = (() => {
         savePlay();
       }
     }
-    const damage = ClassFx.withRiders(entry.damage, riders);
     const added = riders.map((r) => r.name);
+    const twice = (expr) => (crit ? Rolls.critical(expr) : expr);
+    // Each rider is its own typed group, so resistances apply per type
+    const riderType = (r) =>
+      r.kind === "sneak" ? entry.damageType : Damage.typeOf(r.note) || (r.kind === "always" ? "radiant" : null);
     await doRoll({
       name: `${entry.name} damage${crit ? " (crit)" : ""}${added.length ? ` + ${added.join(", ")}` : ""}`,
-      damage: crit ? Rolls.critical(damage) : damage,
+      damage: twice(entry.damage),
+      damageType: entry.damageType || null,
+      extraDamage: riders.filter((r) => r.dice).map((r) => ({ name: r.name, roll: twice(r.dice), type: riderType(r) })),
       mode,
       kind: "damage",
     });
@@ -3259,7 +3772,69 @@ const App = (() => {
       roll: `d20${DDB.signed(s.initiative)}`,
       mode,
       kind: "check", // buffs that apply to checks apply here too
+      initiativeFor: state.creatureId ? { id: state.creatureId, dex: s.abilities?.dex?.score ?? null } : null,
     });
+  }
+
+  // --- initiative into TaleSpire's order --------------------------------------
+  //
+  // TaleSpire's initiative is an order of minis with no numbers, so the GM's
+  // panel keeps the numbers rolled this fight and, through the bridge, sorts
+  // TaleSpire's order by them: highest first, ties to the higher Dexterity.
+  // Minis already in the order without a number keep their places after.
+
+  const initValues = new Map(); // creature id -> { value, dex }
+
+  async function placeInInitiative(entries) {
+    if (!state.isGM || !Bridge.canWrite()) return;
+    for (const e of entries) if (e?.id && Number.isFinite(e.value)) initValues.set(e.id, { value: e.value, dex: e.dex ?? 0 });
+    const now = await Bridge.initiative();
+    if (!now) return;
+    const ids = now.items.filter((i) => i.kind === "creature").map((i) => i.id);
+    for (const e of entries) if (e?.id && !ids.includes(e.id)) ids.push(e.id);
+    const ranked = ids.filter((id) => initValues.has(id)).sort((a, b) => {
+      const x = initValues.get(a);
+      const y = initValues.get(b);
+      return y.value - x.value || (y.dex ?? 0) - (x.dex ?? 0);
+    });
+    const unranked = ids.filter((id) => !initValues.has(id));
+    const r = await Bridge.setInitiative([...ranked, ...unranked]);
+    if (!r.ok) return toast(`Couldn't update TaleSpire's initiative (${r.error}).`, true);
+    refreshInitiative();
+  }
+
+  /** A new fight starts from nothing: forget last fight's numbers when initiative ends. */
+  function clearInitiativeValues() {
+    initValues.clear();
+  }
+
+  /** Roll initiative for every linked monster in the fight, one throw, and place them. */
+  async function rollMonsterInitiative() {
+    const enc = Encounters.current;
+    const rows = (enc?.combatants || []).filter((c) => c.creatureId && !initValues.has(c.creatureId));
+    if (!rows.length) return toast("Every linked monster already has initiative (link minis to roll for them).");
+    const groupIds = {};
+    const groups = [];
+    for (const c of rows) {
+      let dex = 0;
+      let score = 10;
+      try {
+        const m = c.cached || (await Monsters.get(c.slug));
+        dex = m?.abilities?.dex?.mod ?? 0;
+        score = m?.abilities?.dex?.score ?? 10;
+      } catch {
+        /* +0 */
+      }
+      const name = `${c.label}: initiative`;
+      groupIds[name] = { id: c.creatureId, dex: score };
+      groups.push({ name, roll: `d20${DDB.signed(dex)}` });
+    }
+    try {
+      await Rolls.stage({ name: "Monster initiative", groups, context: { kind: "initiativeGroup", groupIds } });
+      renderStaged();
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
 
   /**
@@ -3297,8 +3872,9 @@ const App = (() => {
     }
 
     const active = queue.items[queue.activeItemIndex];
-    const mine = state.creatureId
-      ? queue.items.findIndex((i) => i.id === state.creatureId)
+    const meId = myQueueId(queue);
+    const mine = meId
+      ? queue.items.findIndex((i) => i.id === meId)
       : -1;
 
     const round = turnSeen?.round ? `<b>Round ${turnSeen.round}</b> ` : "";
@@ -3401,6 +3977,7 @@ const App = (() => {
       hit.onclick = (ev) =>
         doRoll({
           name: a.name, roll: a.attackRoll, mode: modeFromEvent(ev), kind: "attack", damage: null, parkedDamage: a.damageRoll,
+          parkedType: Damage.typeOf(a.damageType),
           hit: { weapon: true, melee: a.kind === "melee", finesse: (a.properties || []).includes("Finesse") },
         });
       const dmg = document.createElement("div");
@@ -3413,6 +3990,16 @@ const App = (() => {
       crit.innerHTML = `<span>Crit</span><b>${escapeHtml(critOf(a.damageRoll) || "—")}</b>`;
       tiles.append(hit, dmg, crit);
       card.appendChild(tiles);
+
+      // Against the picked target: in reach, in range, long range or out
+      const t = state.target;
+      const verdict = t ? Range.attackAt(a, t.distance, { enemyAdjacent: Boolean(t.enemyAdjacent) && a.kind !== "melee" }) : null;
+      if (verdict) {
+        const line = document.createElement("div");
+        line.className = `attack-range${verdict.ok ? "" : " is-out"}${verdict.disadvantage ? " is-disadv" : ""}`;
+        line.textContent = `${t.name} ${t.distance} ft: ${verdict.text}`;
+        card.appendChild(line);
+      }
       box.appendChild(card);
     }
   }
@@ -4152,6 +4739,7 @@ const App = (() => {
               mode,
               kind: "attack",
               parkedDamage: rolls.damage,
+              parkedType: Damage.typeOf(sp.damage?.[0]?.type),
               hit: { spellAttack: true },
             })
           )
@@ -4159,8 +4747,11 @@ const App = (() => {
       }
 
       if (sp.requiresSavingThrow && block.saveDc) {
+        const ask = button(`Request ${String(sp.saveAbility || "").slice(0, 3).toUpperCase()} saves`, "btn-gold", () => requestSpellSaves(sp, block, chosen));
+        ask.title = "Ask the creatures in this spell's zone (or the lassoed ones) to save. Players roll on their own panels and never see the DC.";
+        actions.appendChild(ask);
         actions.appendChild(
-          button(`Post DC ${block.saveDc}`, "", () =>
+          button(`Post DC ${block.saveDc}`, "btn-ghost", () =>
             announce(`casts ${Rolls.bold(sp.name)} — ${sp.saveAbility || ""} save DC ${block.saveDc}`.trim())
           )
         );
@@ -4169,7 +4760,7 @@ const App = (() => {
       if (rolls.damage && !sp.requiresAttackRoll) {
         actions.appendChild(
           button(`Damage ${rolls.damage}`, "", (mode) =>
-            doRoll({ name: sp.name, damage: rolls.damage, mode, kind: "damage" })
+            doRoll({ name: sp.name, damage: rolls.damage, damageType: Damage.typeOf(sp.damage?.[0]?.type), mode, kind: "damage" })
           )
         );
       }
@@ -4219,7 +4810,17 @@ const App = (() => {
 
     drawLevels();
     drawActions();
-    body.append(meta, desc, levelRow, actions);
+    const parts = [meta, desc, levelRow, actions];
+    const reachFt = Range.spellRangeFt(sp.range);
+    const t = state.target;
+    if (t?.distance != null && reachFt != null && reachFt > 0) {
+      const line = document.createElement("p");
+      const ok = t.distance <= reachFt;
+      line.className = `attack-range${ok ? "" : " is-out"}`;
+      line.textContent = `${t.name} is ${t.distance} ft away: ${ok ? "in range" : "out of range"} (${reachFt} ft)`;
+      parts.splice(1, 0, line);
+    }
+    body.append(...parts);
   }
 
   /** Spend the slot or the use and say so. Rolling is separate — cast, then roll. */
@@ -4618,13 +5219,18 @@ const App = (() => {
         roll: withFlat(spec.roll),
         damage: withFlat(spec.damage),
         damageName: spec.damageName,
+        damageType: spec.damageType || null,
+        extraDamage: spec.extraDamage || null,
         bonuses: fx.dice,
         mode: spec.mode || state.mode,
         // parkedDamage rides along so the result handler can arm a damage button
         // once the DM calls the hit.
         context: {
-          kind: spec.kind, target: state.target, parkedDamage: spec.parkedDamage || null, hit: spec.hit || null,
+          kind: spec.kind, target: state.target, parkedDamage: spec.parkedDamage || null, parkedType: spec.parkedType || null, hit: spec.hit || null,
           ...(spec.kind === "temp" ? { tempFor: spec.tempFor || null, tempName: spec.tempName || null, source: spec.source || null } : {}),
+          ...(spec.saveFor ? { saveFor: spec.saveFor } : {}),
+          ...(spec.initiativeFor ? { initiativeFor: spec.initiativeFor } : {}),
+          ...(spec.saveSession ? { saveSession: spec.saveSession } : {}),
         },
       });
       renderStaged();
@@ -4668,10 +5274,55 @@ const App = (() => {
       line += ` ${Rolls.dim("healed")}`;
     }
 
+    // Initiative: into TaleSpire's order (here if this is the GM's panel, else via the GM's)
+    if (ctx.initiativeFor && summary.total != null) {
+      if (state.isGM && Bridge.canWrite()) placeInInitiative([{ id: ctx.initiativeFor.id, value: summary.total, dex: ctx.initiativeFor.dex }]);
+      else Party.initiative(ctx.initiativeFor.id, summary.total, ctx.initiativeFor.dex).catch(() => {});
+    }
+    if (ctx.kind === "initiativeGroup") {
+      const entries = (summary.groups || []).filter((g) => g.total != null).map((g) => ({ ...ctx.groupIds[g.name], value: g.total }));
+      await placeInInitiative(entries);
+      await postChat(`${Rolls.bold("Initiative")}: ${escapeText((summary.groups || []).map((g) => `${g.name.replace(/: initiative$/, "")} ${g.total}`).join(", "))}`, null);
+      return;
+    }
+
+    // A save someone asked for: back to whichever panel is running it
+    if (ctx.saveFor && summary.total != null) {
+      const own = saveSessions.find((x) => x.id === ctx.saveFor.session);
+      if (own) {
+        Saves.record(own, ctx.saveFor.creatureId, summary.total, summary.natural);
+        renderSaveSessions();
+      } else {
+        await Party.saveResult(ctx.saveFor.session, ctx.saveFor.creatureId, summary.total, summary.natural).catch(() => {});
+      }
+    }
+    // Monsters' saves, all in one throw
+    if (ctx.kind === "saveGroup") {
+      const session = saveSessions.find((x) => x.id === ctx.saveSession);
+      if (session) {
+        for (const g of summary.groups || []) {
+          const id = ctx.groupIds?.[g.name];
+          if (id && g.total != null) Saves.record(session, id, g.total, g.natural);
+        }
+        renderSaveSessions();
+        const list = (summary.groups || []).map((g) => `${g.name.replace(/:.*$/, "")} ${g.total}`).join(", ");
+        await postChat(`${Rolls.bold(session.name)} ${Rolls.dim(`${Saves.ABILITIES[session.ability]} saves:`)} ${escapeText(list)}`, null);
+      }
+      return;
+    }
+    // A save's damage, rolled once for everyone
+    if (ctx.kind === "saveDamage") {
+      const session = saveSessions.find((x) => x.id === ctx.saveSession);
+      if (session && summary.damage != null) {
+        session.rolled = { parts: summary.damageParts?.length ? summary.damageParts : [{ type: session.damage?.type || null, amount: summary.damage }], total: summary.damage };
+        renderSaveSessions();
+      }
+    }
+
     // Temp HP from an effect: yours applies here, anyone else's goes to their panel
     if (ctx.kind === "temp" && summary.damage != null) {
       const amount = summary.damage;
-      if (!ctx.tempFor || ctx.tempFor === state.creatureId) {
+      if (!ctx.tempFor || ctx.tempFor === state.creatureId || ctx.tempFor === myQueueId()) {
         grantTempHp(amount);
         line += ` ${Rolls.dim("temp HP")}`;
       } else {
@@ -4682,7 +5333,8 @@ const App = (() => {
 
     // The extra dice of a monster's crit, rolled after the attack landed
     if (ctx.kind === "critExtra") {
-      await applyMonsterDamage(ctx.target, (ctx.base || 0) + (summary.damage || 0), ctx.source, ctx.creatureId, true);
+      const adj = afterDefenses(ctx.target?.id, (ctx.base || 0) + (summary.damage || 0), ctx.damageType);
+      await applyMonsterDamage(ctx.target, adj.amount, ctx.source, ctx.creatureId, true, adj.note);
       return;
     }
 
@@ -4701,8 +5353,9 @@ const App = (() => {
     // monster's, is the same number needing the same target — and the roll
     // tracker having claimed these dice is an implementation detail, not a
     // reason for them to skip the fight.
-    if (state.isGM && summary.damage != null && ctx.kind !== "healing" && ctx.kind !== "hitdie" && ctx.kind !== "temp") {
+    if (state.isGM && summary.damage != null && !["healing", "hitdie", "temp", "saveDamage"].includes(ctx.kind)) {
       offerDamageToFight({
+        parts: summary.damageParts || null,
         rollId: summary.rollId || `own-${Date.now()}`,
         amount: summary.damage,
         label: summary.name,
@@ -4715,6 +5368,7 @@ const App = (() => {
       state.pending.push({
         name: summary.name,
         damage: ctx.parkedDamage,
+        damageType: ctx.parkedType || null,
         total: summary.total,
         crit: summary.natural === 20,
         // What this hit could add: smites, a mark, Sneak Attack (lib/classfx.js)
@@ -4731,6 +5385,18 @@ const App = (() => {
   /** "1d6+3+2d6" -> "1d6+2d6": the dice a crit adds again, without the modifier. */
   const diceOnly = (expr) => (String(expr || "").match(/\d*d\d+/g) || []).join("+");
 
+  /**
+   * A monster's damage against a player, through the defenses that player's
+   * panel reported (resistance to poison, say). Unknown defenses: as rolled.
+   */
+  function afterDefenses(targetId, amount, type) {
+    const def = Vitals.reportedFor(targetId)?.defenses || null;
+    if (!def || !type) return { amount, note: "" };
+    const { total, rows } = Damage.apply([{ type, amount }], def);
+    const mode = rows[0]?.mode;
+    return { amount: total, note: mode && mode !== "normal" ? `${type} ${mode === "resist" ? "resisted" : mode === "vuln" ? "doubled" : "immune"}` : "" };
+  }
+
   async function resolveMonsterAttack(summary, hit) {
     const ctx = summary.context;
     if (!hit) return; // the posted line already says MISS
@@ -4745,16 +5411,18 @@ const App = (() => {
           name: `${ctx.source} crit dice`,
           damage: diceOnly(ctx.damageExpr),
           damageName: `${ctx.source} crit dice`,
-          context: { kind: "critExtra", target: ctx.target, base, source: ctx.source, creatureId: ctx.creatureId },
+          context: { kind: "critExtra", target: ctx.target, base, source: ctx.source, creatureId: ctx.creatureId, damageType: ctx.damageType || null },
         });
         renderStaged();
       } catch (e) {
         toast(`Crit dice: ${e.message}. Applying the normal damage.`, true);
-        await applyMonsterDamage(ctx.target, base, ctx.source, ctx.creatureId, false);
+        const adj = afterDefenses(ctx.target.id, base, ctx.damageType);
+        await applyMonsterDamage(ctx.target, adj.amount, ctx.source, ctx.creatureId, false, adj.note);
       }
       return;
     }
-    await applyMonsterDamage(ctx.target, base, ctx.source, ctx.creatureId, false);
+    const adj = afterDefenses(ctx.target.id, base, ctx.damageType);
+    await applyMonsterDamage(ctx.target, adj.amount, ctx.source, ctx.creatureId, false, adj.note);
   }
 
   /**
@@ -4763,9 +5431,9 @@ const App = (() => {
    * Without it, the player's panel is told to apply it; either way chat says
    * what happened.
    */
-  async function applyMonsterDamage(target, amount, source, speakerId, crit) {
+  async function applyMonsterDamage(target, amount, source, speakerId, crit, defenseNote = "") {
     const who = target?.name || "the target";
-    const what = `${source || "The monster"}${crit ? " crits" : " hits"} ${who} for ${amount}`;
+    const what = `${source || "The monster"}${crit ? " crits" : " hits"} ${who} for ${amount}${defenseNote ? ` (${defenseNote})` : ""}`;
     let info = null;
     try {
       info = await Board.oneCreature(target.id);
@@ -4796,6 +5464,49 @@ const App = (() => {
   // -------------------------------------------------------------------------
   // Targeting
   // -------------------------------------------------------------------------
+
+  /** "Target: Gnoll (AC 15) · 10 ft" */
+  function targetText() {
+    const t = state.target;
+    if (!t) return "No target";
+    const ac = t.ac != null ? ` (AC ${t.ac})` : state.isGM ? " (no AC stat)" : "";
+    return `Target: ${t.name}${ac}${t.distance != null ? ` · ${t.distance} ft` : ""}`;
+  }
+
+  /**
+   * How far the target is from this sheet's mini, and whether an enemy stands
+   * next to us (for a ranged attack's Disadvantage). Re-measured when either
+   * mini moves. Enemies: with the GM's bridge, every mini that isn't a party
+   * member; without it, only the target is known.
+   */
+  let measuring = false;
+  async function refreshTargetDistance() {
+    const t = state.target;
+    if (!t || !state.creatureId || measuring) return;
+    measuring = true;
+    try {
+      const [me, them] = await Board.creatureInfo([state.creatureId, t.id]);
+      const at = (i) => i?.position ? { ...i.position, size: i.morphs?.[i.activeMorphIndex ?? 0]?.scale || 1 } : null;
+      const per = await feetPerTile();
+      const distance = Range.distanceFt(at(me), at(them), per);
+      let adjacent = distance != null && distance <= 5;
+      const all = await Bridge.creatures();
+      if (all) {
+        const party = new Set([state.creatureId, ...(GM.rows || []).map((r) => r.id)]);
+        const mine = at(me);
+        adjacent = all.some((c) => !party.has(c.id) && !c.hidden && Range.distanceFt(mine, { x: c.x, y: c.y, z: c.z, size: c.scale }, per) <= 5);
+      }
+      if (state.target !== t) return;
+      t.distance = distance;
+      t.enemyAdjacent = adjacent;
+      setTargetStatus(targetText(), true);
+      if (state.sheet) renderAttacks(state.sheet);
+    } catch (e) {
+      console.warn("[Spirekeeper] distance", e);
+    } finally {
+      measuring = false;
+    }
+  }
 
   function setTargetStatus(text, hasTarget) {
     const status = $("target-status");
@@ -4870,7 +5581,7 @@ const App = (() => {
         // for this combatant from here on.
         await saveCurrentEncounter();
         await refreshBoardHp();
-        setTargetStatus(state.target ? `Target: ${state.target.name}` : "No target", Boolean(state.target));
+        setTargetStatus(targetText(), Boolean(state.target));
         return toast(`${combatant.label} linked to ${name}.`);
       }
 
@@ -4878,21 +5589,17 @@ const App = (() => {
         state.pickingSpeaker = false;
         state.speaker = { id: creatureId, name };
         renderSpeaker();
-        setTargetStatus(state.target ? `Target: ${state.target.name}` : "No target", Boolean(state.target));
+        setTargetStatus(targetText(), Boolean(state.target));
         return toast(`Rolls now post as ${name}.`);
       }
 
       const acStat = (info.stats || []).find((st) => /^ac$|armou?r/i.test(st.name || ""));
       const ac = acStat && Number.isFinite(acStat.value) ? acStat.value : null;
 
-      state.target = { id: creatureId, name, ac };
+      state.target = { id: creatureId, name, ac, distance: null };
 
-      setTargetStatus(
-        ac != null
-          ? `Target: ${name} (AC ${ac})`
-          : `Target: ${name} — AC not visible${state.isGM ? " (no AC stat set)" : " to you"}`,
-        true
-      );
+      setTargetStatus(targetText(), true);
+      refreshTargetDistance();
     } catch (e) {
       setTargetStatus("No target", false);
       toast(`Targeting failed: ${e.message}`, true);
@@ -5110,6 +5817,10 @@ const App = (() => {
       results: $("bestiary-results"),
       sheet: $("bestiary-sheet"),
       onRoll: monsterRoll,
+      onRequestSave: async ({ name, ability, dc, damage, damageType, half }) => {
+        const targets = await saveTargets(null);
+        await requestSaves({ name, ability, dc, damage: damage ? { expr: damage, type: damageType || null } : null, half, ...targets });
+      },
       onAnnounce: monsterAnnounce,
       onShow: refreshEncounterPicker,
       scratchContext: scratchSpellContext,
@@ -5141,6 +5852,35 @@ const App = (() => {
       onLink: linkCombatant,
       onRemove: removeCombatant,
       onApplyDamage: applyOfferedDamage,
+      canRollInitiative: () => Bridge.canWrite(),
+      onRollInitiative: () => rollMonsterInitiative(),
+      onMove: (c, op) => {
+        const t = (c.turnState ||= { moved: 0, dashes: 0, lastPos: null });
+        if (op === "dash") t.dashes += 1;
+        if (op === "less") t.moved = Math.max(0, t.moved - 5);
+        if (op === "more") t.moved += 5;
+        if (op === "reset") Object.assign(t, { moved: 0, dashes: 0 });
+        saveCurrentEncounter();
+        Encounters.render();
+      },
+      onAcBonus: (c, n) => undoable(n ? `${c.label} AC +${n}` : `${c.label} AC bonus ended`, () => setMonsterAcBonus(c, n)),
+      onDodge: (c) => {
+        c.dodge = !c.dodge;
+        saveCurrentEncounter();
+        Encounters.render();
+        if (c.dodge) postChat(`${Rolls.bold(c.label)} takes the Dodge action: attacks against it have Disadvantage until its next turn.`, c.creatureId || null);
+      },
+      // Synchronous for drawing; fills the cache and redraws when a stat block loads
+      defensesSync: (c) => {
+        const key = c.id;
+        if (combatantDefenses.has(key)) return combatantDefenses.get(key);
+        combatantDefenses.set(key, null);
+        defensesForCombatant(c).then((d) => {
+          combatantDefenses.set(key, d);
+          Encounters.render();
+        });
+        return null;
+      },
       onAssignTurn: assignTurn,
       onInboxChange: renderFightBadge,
       onError: (m) => toast(m, true),
@@ -5250,7 +5990,14 @@ const App = (() => {
    */
   let encounterBoardTimer = null;
   let followTimer = null;
+  let measureTimer;
   function onCreatureEvent(event) {
+    const id = event?.payload?.id;
+    if (state.isGM && Encounters.current && id) trackMonsterMove(id);
+    if (state.target && (id === state.target.id || id === state.creatureId)) {
+      clearTimeout(measureTimer);
+      measureTimer = setTimeout(refreshTargetDistance, 200);
+    }
     if (state.creatureId && event?.payload?.id === state.creatureId) {
       clearTimeout(followTimer);
       followTimer = setTimeout(followLinkedMini, 150);
@@ -5607,6 +6354,19 @@ document.addEventListener("DOMContentLoaded", () => {
           const id = `zone-${params.ruler}-${(window.devZones || []).length}`;
           window.devZones = [...(window.devZones || []), { id, name: params.name, kind: params.kind, handles: params.handles }];
           return { ok: true, id, from: "ruler" };
+        }
+        if (path === "/initiative" && method === "GET") {
+          const q = window.devQueue || { items: [], activeItemIndex: -1 };
+          return { ok: true, items: q.items.map((i) => ({ id: i.id, kind: "creature" })), current: q.items[q.activeItemIndex]?.id || null };
+        }
+        if (path === "/initiative-set" && method === "POST") {
+          const prev = window.devQueue || { items: [], activeItemIndex: -1 };
+          const cur = prev.items[prev.activeItemIndex]?.id;
+          const items = params.order.split(",").filter(Boolean).map((id) => ({ id, name: devCreatures[id]?.name || id, kind: "creature" }));
+          const idx = Math.max(0, items.findIndex((i) => i.id === cur));
+          window.devQueue = { items, activeItemIndex: items.length ? idx : -1 };
+          setTimeout(() => onInitiativeEvent({ kind: "initiativeUpdated", payload: { queue: window.devQueue } }), 50);
+          return { ok: true, count: items.length };
         }
         if (path === "/ruler" && method === "POST") {
           // The box ruler: placed ~300 ms later as window.devBox's corners

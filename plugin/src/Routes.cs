@@ -22,10 +22,10 @@ namespace Spirekeeper.Bridge
             Func<Func<string>, string> onMain, out int status)
         {
             status = 200;
-            bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove" || path == "/ruler";
+            bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove" || path == "/ruler" || path == "/initiative-set" || path == "/initiative-current";
             switch (path)
             {
-                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures": case "/zone-info": case "/ruler-info": case "/ruler":
+                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures": case "/zone-info": case "/ruler-info": case "/ruler": case "/initiative": case "/initiative-set": case "/initiative-current":
                 case "/hp": case "/stat": case "/emote": case "/zone": case "/zone-remove":
                     break;
                 default:
@@ -61,6 +61,9 @@ namespace Spirekeeper.Bridge
                     case "/zone-info": return ZoneInfo(q["id"]);
                     case "/ruler-info": return RulerInfo(q["id"]);
                     case "/ruler": return StartRuler(q["kind"]);
+                    case "/initiative": return InitiativeRead();
+                    case "/initiative-set": return InitiativeSet(q["order"]);
+                    case "/initiative-current": return InitiativeCurrent(q["id"]);
                     case "/hp": return SetHp(q["id"], q["value"], q["max"]);
                     case "/stat": return SetStat(q["id"], q["index"], q["value"], q["max"]);
                     case "/zone": return KeepZone(q["ruler"], q["name"], q["tint"], q["kind"], q["handles"]);
@@ -324,6 +327,58 @@ namespace Spirekeeper.Bridge
             int m = ruler.CurrentModeIndex;
             var kind = m >= 0 && m < RulerKinds.Length ? RulerKinds[m] : "unknown";
             return Json.Ok($"\"kind\":\"{kind}\",\"editing\":{(ruler.BeingEdited ? "true" : "false")},\"handles\":{sb}");
+        }
+
+        // TaleSpire's initiative is an order of minis, with no numbers: the
+        // panel keeps the rolled numbers and sends the order they sort into.
+        static string InitiativeRead()
+        {
+            var sb = new System.Text.StringBuilder("[");
+            var list = InitiativeManager.TurnQueueList;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var e = list[i];
+                if (i > 0) sb.Append(',');
+                var id = e.Type == QueueElement.ElementType.Creature ? e.CreatureGuid.ToString() : e.AoeGuid.ToString();
+                sb.Append("{\"id\":").Append(Json.Str(id)).Append(",\"kind\":\"").Append(e.Type == QueueElement.ElementType.Creature ? "creature" : "aoe").Append("\"}");
+            }
+            sb.Append(']');
+            var cur = InitiativeManager.CurrentTurnElement;
+            var curId = cur == default(QueueElement) ? null : cur.Type == QueueElement.ElementType.Creature ? cur.CreatureGuid.ToString() : cur.AoeGuid.ToString();
+            return Json.Ok($"\"items\":{sb},\"current\":{Json.Str(curId)}");
+        }
+
+        // The new order, creatures by id. Area entries already in the queue
+        // keep their places relative to each other, after the creatures.
+        static string InitiativeSet(string orderStr)
+        {
+            var mgr = UnityEngine.Object.FindObjectOfType<InitiativeManager>();
+            if (mgr == null) return Json.Err("no board loaded");
+            var lineup = new System.Collections.Generic.List<QueueElement>();
+            foreach (var part in (orderStr ?? "").Split(','))
+            {
+                if (string.IsNullOrWhiteSpace(part)) continue;
+                if (!CreatureGuid.TryParse(part.Trim(), out var cid)) return Json.Err("bad creature id: " + part);
+                if (!CreatureManager.TryGetCreatureData(cid, out _)) return Json.Err("creature not on this board: " + part);
+                var el = new QueueElement(QueueElement.ElementType.Creature, cid);
+                if (!lineup.Contains(el)) lineup.Add(el);
+            }
+            foreach (var e in InitiativeManager.TurnQueueList)
+                if (e.Type == QueueElement.ElementType.Aoe && !lineup.Contains(e)) lineup.Add(e);
+            mgr.SyncQueueList(lineup.ToArray());
+            BridgePlugin.Log.LogInfo($"Initiative set: {lineup.Count} entries");
+            return Json.Ok($"\"count\":{lineup.Count}");
+        }
+
+        static string InitiativeCurrent(string idStr)
+        {
+            var mgr = UnityEngine.Object.FindObjectOfType<InitiativeManager>();
+            if (mgr == null) return Json.Err("no board loaded");
+            if (!CreatureGuid.TryParse(idStr ?? "", out var cid)) return Json.Err("bad creature id");
+            var el = new QueueElement(QueueElement.ElementType.Creature, cid);
+            if (!InitiativeManager.TurnQueueList.Contains(el)) return Json.Err("that mini isn't in initiative");
+            mgr.SetCurrentElement(el);
+            return Json.Ok();
         }
 
         static string RemoveZone(string idStr)

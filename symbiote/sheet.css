@@ -1801,3 +1801,62 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 .event span { flex: 1; min-width: 0; }
 .event.is-next { box-shadow: inset 2px 0 var(--gold); }
 .event.is-undone span { text-decoration: line-through; opacity: 0.5; }
+
+/* ---------- damage waiting in the Fights inbox ---------- */
+
+.damage-offer { display: flex; flex-direction: column; gap: 5px; margin-bottom: 6px; }
+.damage-offer-head { display: flex; align-items: center; gap: 6px; }
+.damage-offer-head .damage-offer-text { flex: 1; }
+.damage-type-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.damage-type-amount { flex: 1; }
+.damage-modes { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.damage-mode { background: none; border: 0; color: var(--fg-dim); font: inherit; font-size: 11px; padding: 2px 7px; cursor: pointer; }
+.damage-mode.is-on { background: var(--gold-bg); color: var(--gold); }
+.damage-offer > .btn { align-self: flex-start; }
+
+/* ---------- saving throws ---------- */
+
+.save-sessions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.save-session { border-color: var(--gold); }
+.save-head { display: flex; align-items: center; gap: 8px; }
+.save-head b { flex: 1; font-size: 14px; }
+.save-dc-label { font-size: 11px; color: var(--fg-dim); display: inline-flex; align-items: center; gap: 4px; }
+.save-dc { width: 46px; background: rgba(0, 0, 0, 0.25); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 5px; font: inherit; font-size: 12px; }
+.save-count { font-size: 12px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.save-sub { margin: 2px 0 4px; }
+.save-rows { display: flex; flex-direction: column; border-top: 1px solid var(--line); margin-top: 4px; }
+.save-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.save-who { flex: 1; min-width: 0; }
+.save-who small { color: var(--fg-dim); }
+.save-kind { font-style: normal; font-size: 9px; border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; margin-right: 5px; color: var(--fg-dim); vertical-align: 1px; }
+.save-total { width: 70px; text-align: right; font-variant-numeric: tabular-nums; }
+.save-total .hint { margin: 0; font-size: 11px; }
+.save-verdict { width: 66px; text-align: center; }
+.save-pass, .save-fail { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; }
+.save-pass { color: var(--ok); background: var(--ok-bg); }
+.save-fail { color: var(--danger); background: var(--bad-bg); }
+.save-mark { background: none; border: 1px solid var(--line); color: var(--fg-dim); border-radius: 4px; font-size: 11px; padding: 0 5px; cursor: pointer; }
+.save-mark.is-on { color: var(--gold); border-color: var(--gold); }
+.save-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.save-actions .hint { margin: 0; }
+.save-prompts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.save-prompt { display: flex; align-items: center; gap: 6px; border-color: var(--gold); background: linear-gradient(var(--gold-bg), var(--gold-bg)), var(--card); }
+.save-prompt-text { flex: 1; font-size: 13px; }
+.save-prompt-text b { color: var(--gold); }
+
+/* ---------- range to the target ---------- */
+
+.attack-range { margin-top: 5px; font-size: 12px; color: var(--ok); }
+.attack-range.is-disadv { color: var(--accent); }
+.attack-range.is-out { color: var(--danger); }
+.spell .attack-range { margin: 2px 0 4px; }
+
+/* ---------- a monster's turn, in Fights ---------- */
+
+.monster-turn { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; padding-top: 4px; }
+.monster-move b { color: var(--fg); }
+.monster-move.is-over b { color: var(--danger); }
+.monster-lasting { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.monster-lasting .hint { margin: 0; }
+.monster-ac-input { width: 46px; background: rgba(0, 0, 0, 0.25); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 5px; font: inherit; font-size: 12px; }
+.combatant { flex-wrap: wrap; }

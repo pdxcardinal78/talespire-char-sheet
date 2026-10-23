@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "This installer is for macOS. Windows needs the Windows BepInEx build and a different launcher; not written yet." >&2
+  echo "This installer is for macOS. On Windows, use plugin/install-windows.ps1." >&2
   exit 1
 fi
 

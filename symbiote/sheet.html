@@ -64,6 +64,9 @@
 </section>
 
 <!-- Sheet -->
+<!-- Saving throws this panel is running: on every view, since a GM may be in Fights -->
+<div id="save-sessions" class="save-sessions hidden"></div>
+
 <section id="sheet-view" class="view hidden">
   <header class="sheet-header">
     <img id="avatar" class="avatar hidden" alt="">
@@ -156,6 +159,7 @@
   </div>
 
   <div id="staged-roll" class="staged-roll hidden"></div>
+  <div id="save-prompts" class="save-prompts hidden"></div>
   <div id="turn-prompts" class="turn-prompts hidden"></div>
   <div id="pending-damage" class="pending hidden"></div>
   <div id="effect-inbox" class="inbox"></div>
@@ -363,6 +367,9 @@
 </section>
 
 <script src="lib/ddb.js"></script>
+<script src="lib/damage.js"></script>
+<script src="lib/saves.js"></script>
+<script src="lib/range.js"></script>
 <script src="lib/board.js"></script>
 <script src="lib/bridge.js"></script>
 <script src="lib/vitals.js"></script>

@@ -137,6 +137,9 @@ includes each mini's `position` and `rotation`, so an area-of-effect helper
 | `POST /zone?ruler=&name=[&kind=&handles=]` | Keep a placed ruler on the board as one of TaleSpire's area markers, returning its `id`. Uses the live ruler's handles (rulers are shared, so a player's works too), or else `kind` (`sphere`, `line`, `cone`) and `handles` (`x,y,z;x,y,z;…`, a cone's third handle being half its angle in x). GM only. Added in 0.4.0; 0.4.2 sends TaleSpire's `ApplyAoeOp` itself, because `AoeManager.AddAoe` treats a supplied id as an edit and silently drops it |
 | `POST /ruler?kind=` | Open TaleSpire's ruler as `sphere`, `line`, `cone` or `box`, returning its `id`. The symbiote API has no box (cube) ruler; this does. If a panel holds the ruler, it's put away first. GM only. Added in 0.5.0 |
 | `GET /ruler-info?id=` | A ruler's `kind`, whether it's being dragged (`editing`) and its `handles`, or `{ gone: true }`. A box is two opposite corners. TaleSpire sends symbiotes no events for box rulers, so Spirekeeper polls this one. Added in 0.5.0 |
+| `GET /initiative` | TaleSpire's initiative order, `{ items: [{ id, kind }], current }`. Added in 0.6.0 |
+| `POST /initiative-set?order=id,id,...` | Set the order, creatures first to last; area entries keep their places after them. TaleSpire's initiative has no numbers, so the panel keeps the rolls and sends the sorted order. GM only. Added in 0.6.0 |
+| `POST /initiative-current?id=` | Make it that creature's turn. GM only. Added in 0.6.0 |
 | `GET /zone-info?id=` | A kept marker's current shape, `{ name, kind, handles: [{x,y,z}] }`, or `{ gone: true }`, so the panel can follow a dragged marker. Added in 0.4.3 |
 | `POST /zone-remove?id=` | Remove an area marker made by `/zone`. GM only. Added in 0.4.0 |
 
@@ -204,6 +207,21 @@ Dock) is always plain, unmodded TaleSpire; BepInEx only loads through
 
 Remove everything with `./plugin/install-mac.sh --uninstall`.
 
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\plugin\install-windows.ps1
+```
+
+It finds TaleSpire in Steam's libraries (or takes `-Path`), downloads the stock
+Windows BepInEx 5.4.23.5, and puts it and the bridge beside `TaleSpire.exe`.
+On Windows BepInEx loads through `winhttp.dll`, so TaleSpire starts with the
+bridge however it's launched; none of the Apple Silicon workarounds apply.
+`-Uninstall` removes it all. The DLL is the same one the Mac build makes
+(build with `plugin/build.sh` on macOS, Linux or Git Bash, or pass a built copy
+with `-Dll`). Only the GM needs it. Tested with PowerShell 7 against a mock
+folder; not yet against a real Windows TaleSpire.
+
 ## Test checklist
 
 | # | Do this | Confirms |
@@ -234,5 +252,5 @@ the game, waits 45 seconds, and collects `LogOutput.log`, any
 
 ## Still to do
 
-- **Windows.** Only the macOS installer exists. Windows uses the stock Windows
-  BepInEx build and needs none of the arm64 workarounds.
+- **Windows, for real.** `install-windows.ps1` exists and is tested against a
+  mock install; it hasn't met a Windows TaleSpire yet.

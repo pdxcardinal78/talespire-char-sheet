@@ -91,8 +91,9 @@ const Party = (() => {
   // nowhere near.
 
   /** A player's panel telling the GM its mini's HP, max and temp pool. */
-  async function reportVitals(creatureId, hp, max, temp) {
-    await broadcast({ t: "vit", c: creatureId, h: hp, m: max, tp: temp });
+  /** `defenses` is Damage.pack's "r:fire;i:poison", so the GM can apply resistances. */
+  async function reportVitals(creatureId, hp, max, temp, defenses) {
+    await broadcast({ t: "vit", c: creatureId, h: hp, m: max, tp: temp, ...(defenses ? { df: defenses } : {}) });
   }
 
   /** The GM telling a player's panel its new temp pool (no Temp HP stat in this campaign). */
@@ -103,6 +104,50 @@ const Party = (() => {
   /** Temp HP an effect gives a creature (Twilight Sanctuary). Its panel keeps the larger pool. */
   async function tempGrant(creatureId, temp, source) {
     await broadcast({ t: "tg", c: creatureId, tp: temp, n: String(source || "").slice(0, 60) });
+  }
+
+  /** A player's initiative roll, for the GM's panel to place in TaleSpire's order. */
+  async function initiative(creatureId, value, dex) {
+    // "iv", not "v": every message's "v" is the protocol version
+    await broadcast({ t: "ini", c: creatureId, iv: value, d: dex });
+  }
+
+  // --- saving throws (see lib/saves.js) --------------------------------------
+
+  /**
+   * A player asking the GM's panel to run a save: the header, and either the
+   * creatures (ids, chunked to fit the 500-character limit) or the zone to
+   * check, which the GM's panel can see in full.
+   */
+  async function saveSession(session, creatureIds, zone) {
+    const head = {
+      t: "svs", s: session.id, n: String(session.name).slice(0, 40), ab: session.ability, dc: session.dc,
+      ...(session.damage ? { dm: session.damage.expr, dt: session.damage.type || "" } : {}),
+      h: session.half ? 1 : 0,
+      ...(zone ? { z: zone } : {}),
+    };
+    const ids = [...(creatureIds || [])];
+    if (!ids.length) return broadcast({ ...head, c: [] });
+    while (ids.length) {
+      const chunk = [];
+      while (ids.length && JSON.stringify({ v: PROTOCOL, ...head, c: [...chunk, ids[0]] }).length <= MAX_MESSAGE - 20) chunk.push(ids.shift());
+      if (!chunk.length) chunk.push(ids.shift());
+      await broadcast({ ...head, c: chunk });
+    }
+  }
+
+  /** The GM's panel took a player's save request. */
+  async function saveAck(sessionId) {
+    await broadcast({ t: "svk", s: sessionId });
+  }
+
+  /** Ask a player's panel to roll a save. The DC is not sent. */
+  async function saveQuery(sessionId, creatureId, ability, name) {
+    await broadcast({ t: "svq", s: sessionId, c: creatureId, ab: ability, n: String(name || "").slice(0, 40) });
+  }
+
+  async function saveResult(sessionId, creatureId, total, natural) {
+    await broadcast({ t: "svr", s: sessionId, c: creatureId, tt: total, nt: natural });
   }
 
   /** The GM telling a player's panel it took damage, when there's no bridge to write the mini. */
@@ -204,9 +249,22 @@ const Party = (() => {
     } else if (msg.t === "ack" && handlers.onAck) {
       handlers.onAck({ effectId: msg.id, playerId: msg.pid, accepted: Boolean(msg.ok) });
     } else if (msg.t === "vit" && handlers.onVitals) {
-      handlers.onVitals({ creatureId: msg.c, hp: msg.h, max: msg.m, temp: msg.tp });
+      handlers.onVitals({ creatureId: msg.c, hp: msg.h, max: msg.m, temp: msg.tp, defenses: msg.df ?? null });
     } else if (msg.t === "tmp" && handlers.onTemp) {
       handlers.onTemp({ creatureId: msg.c, temp: msg.tp });
+    } else if (msg.t === "ini" && handlers.onInitiative) {
+      handlers.onInitiative({ creatureId: msg.c, value: msg.iv, dex: msg.d });
+    } else if (msg.t === "svs" && handlers.onSaveSession) {
+      handlers.onSaveSession({
+        id: msg.s, name: msg.n, ability: msg.ab, dc: msg.dc, half: Boolean(msg.h),
+        damage: msg.dm ? { expr: msg.dm, type: msg.dt || null } : null, creatureIds: msg.c || [], zone: msg.z || null,
+      });
+    } else if (msg.t === "svk" && handlers.onSaveAck) {
+      handlers.onSaveAck({ id: msg.s });
+    } else if (msg.t === "svq" && handlers.onSaveQuery) {
+      handlers.onSaveQuery({ id: msg.s, creatureId: msg.c, ability: msg.ab, name: msg.n });
+    } else if (msg.t === "svr" && handlers.onSaveResult) {
+      handlers.onSaveResult({ id: msg.s, creatureId: msg.c, total: msg.tt, natural: msg.nt });
     } else if (msg.t === "tg" && handlers.onTempGrant) {
       handlers.onTempGrant({ creatureId: msg.c, temp: msg.tp, source: msg.n });
     } else if (msg.t === "hit" && handlers.onHit) {
@@ -255,7 +313,7 @@ const Party = (() => {
   }
 
   return {
-    configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, tempGrant,
+    configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, tempGrant, saveSession, saveAck, saveQuery, saveResult, initiative,
     statusMapping, requestStatusMappings, condition,
     zoneQuery, zoneReply, zoneKeep, zoneKept, zoneRemove,
     receive, reachablePlayers, MAX_MESSAGE,

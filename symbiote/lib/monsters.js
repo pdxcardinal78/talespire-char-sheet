@@ -78,9 +78,17 @@ const Monsters = (() => {
     return Number.isFinite(action.attack_bonus) ? action.attack_bonus : null;
   }
 
+  /** "Hit: 5 (1d6 + 2) piercing damage" -> "piercing" */
+  function damageTypeOf(desc) {
+    const m = /\)\s*([a-z]+)\s+damage/i.exec(String(desc || "")) || /\d+\s+([a-z]+)\s+damage/i.exec(String(desc || ""));
+    const t = m ? m[1].toLowerCase() : null;
+    return typeof Damage !== "undefined" && Damage.TYPES.includes(t) ? t : null;
+  }
+
   function classifyAction(action) {
     const desc = action.desc || "";
     const damage = damageRoll(action);
+    const damageType = damageTypeOf(desc);
 
     const toHit = toHitBonus(action);
     if (ATTACK_RE.test(desc) && Number.isFinite(toHit)) {
@@ -89,6 +97,7 @@ const Monsters = (() => {
         toHit,
         roll: `d20${signed(toHit)}`,
         damage,
+        damageType,
         flat: flatDamage(action, Boolean(damage)),
         reach: (desc.match(/(reach|range)\s+([^,.]+)/i) || [])[0] || null,
       };
@@ -96,11 +105,11 @@ const Monsters = (() => {
 
     const save = desc.match(SAVE_RE);
     if (save) {
-      return { kind: "save", saveDc: Number(save[1]), saveAbility: save[2], damage };
+      return { kind: "save", saveDc: Number(save[1]), saveAbility: save[2], damage, damageType };
     }
 
     // Damage with neither an attack nor a save still wants a roll button.
-    return { kind: damage ? "damage" : "text", damage, flat: flatDamage(action, Boolean(damage)) };
+    return { kind: damage ? "damage" : "text", damage, damageType, flat: flatDamage(action, Boolean(damage)) };
   }
 
   // --- spellcasting --------------------------------------------------------
