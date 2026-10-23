@@ -25,7 +25,7 @@ namespace Spirekeeper.Bridge
             bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove";
             switch (path)
             {
-                case "/whoami": case "/selected": case "/creature": case "/statuses":
+                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures":
                 case "/hp": case "/stat": case "/emote": case "/zone": case "/zone-remove":
                     break;
                 default:
@@ -57,6 +57,7 @@ namespace Spirekeeper.Bridge
                     case "/selected": return Selected();
                     case "/creature": return Creature(q["id"]);
                     case "/statuses": return StatusCatalog();
+                    case "/creatures": return AllCreatures();
                     case "/hp": return SetHp(q["id"], q["value"], q["max"]);
                     case "/stat": return SetStat(q["id"], q["index"], q["value"], q["max"]);
                     case "/zone": return KeepZone(q["ruler"], q["name"], q["tint"]);
@@ -106,6 +107,41 @@ namespace Spirekeeper.Bridge
             CreatureManager.SetCreatureStatByIndex(id, new CreatureStat(value, max), -1);
             BridgePlugin.Log.LogInfo($"HP {id}: {before.Value}/{before.Max} -> {value}/{max}");
             return Json.Ok($"\"before\":{Num(before.Value)},\"value\":{Num(value)},\"max\":{Num(max)}");
+        }
+
+        // Every mini on the board with what a spell zone needs: position (world
+        // units, one tile each), size (the active morph's scale) and whether it's
+        // hidden. The symbiote API has no "all minis" call, and CreatureManager
+        // keeps the list in a private static, hence the reflection.
+        static string AllCreatures()
+        {
+            var field = typeof(CreatureManager).GetField("_creaturesData",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var list = field?.GetValue(null);
+            var getBuffer = list?.GetType().GetMethod("GetBufferUnsafe");
+            if (getBuffer == null) return Json.Err("TaleSpire's creature list changed; plugin needs updating");
+            var args = new object[] { 0 };
+            var buffer = (CreatureDataV4[])getBuffer.Invoke(list, args);
+            int count = (int)args[0];
+
+            var sb = new System.Text.StringBuilder("[");
+            for (int i = 0; i < count; i++)
+            {
+                var d = buffer[i];
+                if (i > 0) sb.Append(',');
+                float scale = 1f;
+                try { scale = d.PackedScales[d.ActiveMorphIndex]; } catch { }
+                sb.Append("{\"id\":").Append(Json.Str(d.CreatureId.ToString()))
+                  .Append(",\"name\":").Append(Json.Str(CreatureManager.AliasOrAssetName(in d)))
+                  .Append(",\"x\":").Append(Num(d.Position.x))
+                  .Append(",\"y\":").Append(Num(d.Position.y))
+                  .Append(",\"z\":").Append(Num(d.Position.z))
+                  .Append(",\"scale\":").Append(Num(scale > 0 ? scale : 1f))
+                  .Append(",\"hidden\":").Append(d.ExplicitlyHidden ? "true" : "false")
+                  .Append('}');
+            }
+            sb.Append(']');
+            return Json.Ok("\"creatures\":" + sb);
         }
 
         // TaleSpire's statuses: the persistent emotes in its emote catalog, with

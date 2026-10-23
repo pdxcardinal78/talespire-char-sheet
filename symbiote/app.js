@@ -63,7 +63,14 @@ const App = (() => {
           if (state.isGM) Statuses.shareAll();
         },
         onCondition: onConditionFromPlayer,
+        onZoneQuery,
+        onZoneReply,
+        onZoneKeep,
+        onZoneKept,
+        onZoneRemove,
       });
+      Zones.configure({ toast, onResult: showZone });
+      Zones.useCreatures(zoneCreatures);
       Statuses.configure({
         changed: () => {
           if (state.isGM) {
@@ -139,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.16.0";
+  const APP_VERSION = "0.17.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1139,6 +1146,8 @@ const App = (() => {
     }
 
     if (granted) removeEffect(granted);
+    // A zone kept on the board for this spell goes when concentration does
+    if (conc.zoneId) removeKeptZone(conc.zoneId);
     play.concentration = null;
     renderConcentration();
     savePlay();
@@ -1147,6 +1156,215 @@ const App = (() => {
       await announce(`stops concentrating on ${Rolls.bold(conc.name)}`);
       toast(`${conc.name} ended.`);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Spell zones (see lib/zones.js)
+  // -------------------------------------------------------------------------
+
+  let zoneShown = null; // the result on the card
+
+  /**
+   * The minis a zone is checked against. The bridge (GM's machine) knows every
+   * mini on the board; otherwise it's the minis this panel knows: the party and
+   * linked combatants for a GM, a player's own mini, and anything lassoed.
+   */
+  async function zoneCreatures() {
+    const all = await Bridge.creatures();
+    if (all) return { creatures: all, source: "every mini on the board" };
+
+    const ids = new Set();
+    if (state.creatureId) ids.add(state.creatureId);
+    if (state.isGM) {
+      // The party list fills when the Party view opens; load it if it hasn't
+      if (!GM.rows?.length) await GM.refresh();
+      for (const r of GM.rows || []) ids.add(r.id);
+      for (const c of Encounters.current?.combatants || []) if (c.creatureId) ids.add(c.creatureId);
+    }
+    let selected = [];
+    try {
+      const sel = await TS.creatures.getSelectedCreatures();
+      if (Array.isArray(sel)) selected = sel.map((x) => x.id || x);
+    } catch {
+      /* none */
+    }
+    for (const id of selected) ids.add(id);
+    const infos = await Board.creatureInfo([...ids]);
+    const creatures = infos.filter((i) => i?.position).map((i) => ({
+      id: i.id,
+      name: i.name || "Unnamed",
+      x: i.position.x, y: i.position.y, z: i.position.z,
+      scale: i.morphs?.[i.activeMorphIndex ?? 0]?.scale || 1,
+      hidden: Boolean(i.isExplicitlyHidden),
+    }));
+    const parts = [state.isGM ? "party and linked fight minis" : "your mini"];
+    if (selected.length) parts.push(`${selected.length} selected`);
+    return { creatures, source: parts.join(" and ") };
+  }
+
+  /** Show who's inside. A player's panel also asks the GM's, which can see every mini. */
+  function showZone(result) {
+    zoneShown = { ...result, gmNames: null, awaitingGm: !state.isGM };
+    renderZoneCard();
+    if (!state.isGM) {
+      Party.zoneQuery(result.rulerId, result.shape, result.area?.size ?? null).catch(() => {});
+      setTimeout(() => {
+        if (zoneShown?.rulerId === result.rulerId && zoneShown.awaitingGm) {
+          zoneShown.awaitingGm = false;
+          renderZoneCard();
+        }
+      }, 2500);
+    }
+  }
+
+  function renderZoneCard() {
+    const card = $("zone-card");
+    const z = zoneShown;
+    card.classList.toggle("hidden", !z);
+    card.replaceChildren();
+    if (!z) return;
+
+    const head = document.createElement("div");
+    head.className = "zone-head";
+    head.innerHTML =
+      `<strong>${escapeHtml(z.spell?.name || "Zone")}</strong>` +
+      `<span class="sub">${escapeHtml(Zones.describeArea(z.area) || z.shape)}` +
+      `${z.size ? ` · ruler ${z.size} ${escapeHtml(z.units)}` : ""}</span>`;
+    card.appendChild(head);
+
+    if (z.offBy) {
+      const warn = document.createElement("p");
+      warn.className = "zone-warn";
+      warn.textContent = `The ruler is ${z.size} ${z.units}; ${z.spell?.name || "the spell"} is ${z.area.size}. Re-place it if that's not on purpose.`;
+      card.appendChild(warn);
+    }
+
+    // The GM's answer wins for a player: it saw every mini
+    const names = z.gmNames
+      ? z.gmNames
+      : z.inside.filter((c) => state.isGM || !c.hidden).map((c) => (state.isGM && c.hidden ? `${c.name} (hidden)` : c.name));
+    const list = document.createElement("div");
+    list.className = "zone-list";
+    if (!names.length) {
+      list.textContent = z.awaitingGm ? "Asking the GM's panel…" : "Nobody inside.";
+    } else {
+      for (const n of names) {
+        const chip = document.createElement("span");
+        chip.className = "zone-chip";
+        chip.textContent = n;
+        list.appendChild(chip);
+      }
+      if (z.gmMore) list.appendChild(document.createTextNode(` +${z.gmMore} more`));
+    }
+    card.appendChild(list);
+
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.textContent = z.gmNames
+      ? "Checked by the GM's panel against every mini it can see."
+      : `Checked ${z.checked} ${z.checked === 1 ? "mini" : "minis"}: ${z.source}.` +
+        (!state.isGM && !z.awaitingGm ? " No GM panel answered; lasso minis to include them." : "");
+    card.appendChild(note);
+
+    const actions = document.createElement("div");
+    actions.className = "zone-actions";
+    if (names.length) {
+      actions.appendChild(button("Post to chat", "", () =>
+        announce(`${Rolls.bold(z.spell?.name || "Zone")}: ${names.filter((n) => !/\(hidden\)$/.test(n)).join(", ") || "nobody"} inside`)));
+    }
+    if (Bridge.canWrite() || !state.isGM) {
+      const keep = button("Keep on board", "btn-ghost", () => keepZone(z));
+      keep.title = "Leave this area on the board as a TaleSpire marker" +
+        (z.spell?.concentration ? "; it goes when you stop concentrating" : "");
+      actions.appendChild(keep);
+    }
+    actions.appendChild(button("Close", "btn-ghost", () => {
+      zoneShown = null;
+      renderZoneCard();
+    }));
+    card.appendChild(actions);
+  }
+
+  /** Leave the placed ruler on the board as a TaleSpire area marker, via the GM's bridge. */
+  async function keepZone(z) {
+    const name = z.spell?.name || "Zone";
+    if (Bridge.canWrite()) {
+      const r = await Bridge.keepZone(z.rulerId, name);
+      if (!r.ok) return toast(`Couldn't keep the zone (${r.error}).`, true);
+      zoneKeptLocally(name, r.id, z.spell);
+    } else {
+      pendingKeeps.set(String(z.rulerId), { name, spell: z.spell });
+      await Party.zoneKeep(z.rulerId, name).catch(() => {});
+      toast("Asked the GM's panel to keep it on the board…");
+    }
+  }
+
+  const pendingKeeps = new Map(); // rulerId -> { name, spell } a player asked the GM to keep
+
+  /** A kept concentration spell's zone rides on concentration, so dropping it clears the board. */
+  async function zoneKeptLocally(name, zoneId, spell) {
+    toast(`${name} is on the board.`);
+    if (!state.sheet || !spell?.concentration) return;
+    const play = state.sheet.play;
+    if (play.concentration && play.concentration.name !== name) {
+      await endConcentration();
+    }
+    play.concentration = { ...(play.concentration || {}), name, effectId: play.concentration?.effectId || null, zoneId };
+    renderConcentration();
+    savePlay();
+  }
+
+  function removeKeptZone(zoneId) {
+    if (Bridge.canWrite()) {
+      Bridge.removeZone(zoneId).then((r) => {
+        if (!r.ok) toast(`Couldn't clear the zone from the board (${r.error}).`, true);
+      });
+    } else {
+      Party.zoneRemove(zoneId).catch(() => {});
+    }
+  }
+
+  // GM side of a player's zone requests
+  async function onZoneQuery({ rulerId, shape, size }) {
+    if (!state.isGM) return;
+    let ruler = null;
+    try {
+      const infos = await TS.rulers.getMoreInfo([String(rulerId)]);
+      ruler = Array.isArray(infos) ? infos.find((r) => String(r?.id) === String(rulerId)) || infos[0] : null;
+    } catch {
+      return;
+    }
+    if (!ruler || ruler.beingEdited) return;
+    const area = size ? { shape, size } : null;
+    const result = await Zones.check(shape || Zones.shapeOfRuler(ruler), ruler, { area }, { hideHidden: true });
+    await Party.zoneReply(rulerId, result.inside.map((c) => c.name)).catch(() => {});
+  }
+
+  function onZoneReply({ rulerId, names, more }) {
+    if (state.isGM || !zoneShown || String(zoneShown.rulerId) !== String(rulerId)) return;
+    zoneShown.gmNames = names;
+    zoneShown.gmMore = more;
+    zoneShown.awaitingGm = false;
+    renderZoneCard();
+  }
+
+  async function onZoneKeep({ rulerId, name }) {
+    if (!state.isGM || !Bridge.canWrite()) return;
+    const r = await Bridge.keepZone(rulerId, name);
+    if (r.ok) await Party.zoneKept(rulerId, r.id).catch(() => {});
+    else console.warn("[Spirekeeper] couldn't keep a player's zone", r.error);
+  }
+
+  function onZoneKept({ rulerId, zoneId }) {
+    const ask = pendingKeeps.get(String(rulerId));
+    if (!ask) return;
+    pendingKeeps.delete(String(rulerId));
+    zoneKeptLocally(ask.name, zoneId, ask.spell);
+  }
+
+  function onZoneRemove({ zoneId }) {
+    if (!state.isGM || !Bridge.canWrite() || !zoneId) return;
+    Bridge.removeZone(zoneId);
   }
 
   function renderConcentration() {
@@ -2835,6 +3053,13 @@ const App = (() => {
         actions.appendChild(cast);
       }
 
+      const area = Zones.areaOf(sp);
+      if (area) {
+        const z = button(`Zone ${Zones.describeArea(area)}`, "btn-ghost", () => Zones.cast(sp));
+        z.title = "Place TaleSpire's ruler for this spell's area and see who's inside";
+        actions.appendChild(z);
+      }
+
       actions.appendChild(button("Post to chat", "btn-ghost", () => announce(`casts ${Rolls.bold(sp.name)}`)));
     }
 
@@ -3825,6 +4050,11 @@ async function onRollResults(event) {
   }
 }
 
+/** Rulers placed in TaleSpire; a spell zone waits on the one it started. */
+function onRulerEvent(event) {
+  Zones.onRulerEvent(event);
+}
+
 function onInitiativeEvent(event) {
   if (event.kind === "initiativeUpdated") {
     App.onInitiativeUpdated(event.payload?.queue);
@@ -3889,6 +4119,18 @@ document.addEventListener("DOMContentLoaded", () => {
         ownerIds: ["dev-offline"], isExplicitlyHidden: true },
       "pc-5": { id: "pc-5", name: "Unowned NPC", stats: [] },
     };
+
+    // Where the fixtures stand, in tiles, for spell zones: a line along x
+    const devPlaces = {
+      "pc-1": [0, 0], "pc-5": [1, 1], "pc-2": [2, 0], "dev-owned": [3, 1],
+      "pc-3": [5, 0], "pc-4": [10, 0], "dev-foreign": [30, 0],
+    };
+    for (const [id, [x, z]] of Object.entries(devPlaces)) {
+      if (!devCreatures[id]) continue;
+      devCreatures[id].position = { x, y: 0, z };
+      devCreatures[id].morphs = [{ boardAssetId: "dev", scale: id === "pc-4" ? 2 : 1 }];
+      devCreatures[id].activeMorphIndex = 0;
+    }
 
     // A campaign with a "Temp HP" stat, as slot 2, on every fixture that has
     // stats. window.devTempStat = false before load simulates a campaign
@@ -4036,6 +4278,26 @@ document.addEventListener("DOMContentLoaded", () => {
           activeItemIndex: 0,
         }),
       },
+      // The ruler: startRuler opens it, and ~300 ms later it's "placed" as
+      // window.devRuler describes, or a default 20 ft sphere / 15 ft cone /
+      // 100 ft line from the origin, reported through onRulerEvent.
+      rulers: {
+        getDistanceUnitsForThisCampaign: async () => ({ name: "ft", numberPerTile: 5 }),
+        startRuler: async (kind) => {
+          const id = `ruler-${Date.now()}`;
+          const P = (x, y, z) => ({ x, y, z });
+          const shapes = {
+            sphere: { startPosition: P(0, 0, 0), endPosition: P(4, 0, 0) },
+            cone: { startPosition: P(0, 0, 0), endPosition: P(3, 0, 0), angle: 53.13 },
+            line: { positions: [P(0, 0, 0), P(20, 0, 0)] },
+          };
+          const ruler = { id, beingEdited: false, ...(window.devRuler || shapes[kind]) };
+          window.devLastRuler = ruler;
+          setTimeout(() => onRulerEvent({ kind: "rulerResult", payload: { ruler } }), 300);
+          return id;
+        },
+        getMoreInfo: async (ids) => (window.devLastRuler && ids.includes(window.devLastRuler.id) ? [window.devLastRuler] : []),
+      },
       // Loop sync messages back to this panel so the grant/accept/revoke flow is
       // exercisable solo: you play both caster and recipient.
       sync: {
@@ -4056,6 +4318,19 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log("[dev] bridge", method, path, params || "");
         if (path === "/ping") return { ok: true, version: "dev" };
         if (path === "/whoami") return { ok: true, canGm: true };
+        if (path === "/creatures") {
+          return { ok: true, creatures: Object.values(devCreatures).filter((c) => c.position).map((c) => ({
+            id: c.id, name: c.name, ...c.position, scale: c.morphs?.[0]?.scale || 1, hidden: Boolean(c.isExplicitlyHidden),
+          })) };
+        }
+        if (path === "/zone" && method === "POST") {
+          window.devZones = [...(window.devZones || []), { id: `zone-${params.ruler}`, name: params.name }];
+          return { ok: true, id: `zone-${params.ruler}` };
+        }
+        if (path === "/zone-remove" && method === "POST") {
+          window.devZones = (window.devZones || []).filter((z) => z.id !== params.id);
+          return { ok: true };
+        }
         if (path === "/statuses") {
           // A stand-in for TaleSpire's emote catalog; e1 and e2 are on Kree
           return { ok: true, statuses: [

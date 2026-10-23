@@ -26,7 +26,7 @@ const Party = (() => {
 
   let handlers = {};
 
-  /** @param {{onGrant, onRevoke, onAck, onVitals, onTemp, onHit, onStatusMapping, onStatusRequest, onCondition}} h */
+  /** @param {{onGrant, onRevoke, onAck, onVitals, onTemp, onHit, onStatusMapping, onStatusRequest, onCondition, onZoneQuery, onZoneReply, onZoneKeep, onZoneKept, onZoneRemove}} h */
   function configure(h) {
     handlers = h;
   }
@@ -119,6 +119,42 @@ const Party = (() => {
     await broadcast({ t: "cnd", c: creatureId, e: emoteId, on: on ? 1 : 0 });
   }
 
+  // --- spell zones -----------------------------------------------------------
+  //
+  // Rulers are shared across clients, so a player's panel can ask the GM's,
+  // which sees every mini, who is inside a ruler the player placed.
+
+  async function zoneQuery(rulerId, shape, size) {
+    await broadcast({ t: "zq", r: String(rulerId), s: shape, a: size });
+  }
+
+  /** Names inside, trimmed to fit the 500-character sync limit. */
+  async function zoneReply(rulerId, names) {
+    const list = [];
+    let more = 0;
+    for (const n of names) {
+      const next = [...list, String(n).slice(0, 40)];
+      if (JSON.stringify({ v: PROTOCOL, t: "zr", r: String(rulerId), n: next, m: 0 }).length > MAX_MESSAGE - 20) {
+        more = names.length - list.length;
+        break;
+      }
+      list.push(String(n).slice(0, 40));
+    }
+    await broadcast({ t: "zr", r: String(rulerId), n: list, m: more });
+  }
+
+  async function zoneKeep(rulerId, name) {
+    await broadcast({ t: "zk", r: String(rulerId), n: String(name || "").slice(0, 60) });
+  }
+
+  async function zoneKept(rulerId, zoneId) {
+    await broadcast({ t: "zkd", r: String(rulerId), id: zoneId });
+  }
+
+  async function zoneRemove(zoneId) {
+    await broadcast({ t: "zx", id: zoneId });
+  }
+
   /**
    * Route an inbound message. `mePlayerId` is how a panel decides a broadcast is
    * addressed to it.
@@ -160,6 +196,16 @@ const Party = (() => {
       handlers.onStatusRequest();
     } else if (msg.t === "cnd" && handlers.onCondition) {
       handlers.onCondition({ creatureId: msg.c, emoteId: msg.e, on: Boolean(msg.on) });
+    } else if (msg.t === "zq" && handlers.onZoneQuery) {
+      handlers.onZoneQuery({ rulerId: msg.r, shape: msg.s, size: msg.a });
+    } else if (msg.t === "zr" && handlers.onZoneReply) {
+      handlers.onZoneReply({ rulerId: msg.r, names: msg.n || [], more: msg.m || 0 });
+    } else if (msg.t === "zk" && handlers.onZoneKeep) {
+      handlers.onZoneKeep({ rulerId: msg.r, name: msg.n });
+    } else if (msg.t === "zkd" && handlers.onZoneKept) {
+      handlers.onZoneKept({ rulerId: msg.r, zoneId: msg.id });
+    } else if (msg.t === "zx" && handlers.onZoneRemove) {
+      handlers.onZoneRemove({ zoneId: msg.id });
     }
   }
 
@@ -189,7 +235,9 @@ const Party = (() => {
 
   return {
     configure, grant, revoke, acknowledge, reportVitals, setTemp, hit,
-    statusMapping, requestStatusMappings, condition, receive, reachablePlayers, MAX_MESSAGE,
+    statusMapping, requestStatusMappings, condition,
+    zoneQuery, zoneReply, zoneKeep, zoneKept, zoneRemove,
+    receive, reachablePlayers, MAX_MESSAGE,
   };
 })();
 

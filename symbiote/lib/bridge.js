@@ -143,6 +143,17 @@ const Bridge = (() => {
     }
   }
 
+  /** Every mini on the board with position and size, for spell zones. GM's machine only. */
+  async function creatures() {
+    if (!status.available) return null;
+    try {
+      const r = await transport("GET", "/creatures");
+      return r?.ok ? r.creatures || [] : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Keep a placed ruler on the board as one of TaleSpire's area markers. Returns { ok, id }. */
   async function keepZone(rulerId, name) {
     if (!canWrite()) return { ok: false, error: "bridge unavailable" };
@@ -165,7 +176,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, setEmote, statuses, keepZone, removeZone, onChange, useTransport,
+    probe, canWrite, setHp, setStat, setEmote, statuses, creatures, keepZone, removeZone, onChange, useTransport,
     get status() { return status; },
   };
 })();

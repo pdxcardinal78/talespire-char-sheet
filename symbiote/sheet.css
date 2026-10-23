@@ -1221,3 +1221,18 @@ textarea {
 .status-map-name .sub { color: var(--fg-dim); font-size: 11px; }
 .status-map-bar { display: flex; justify-content: flex-end; margin-bottom: 2px; }
 .cond-inline { color: var(--danger); }
+
+/* ---------- spell zones ---------- */
+
+.zone-card {
+  position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 40;
+  background: var(--bg-2); border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 8px 10px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  max-height: 50vh; overflow: auto;
+}
+.zone-head { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; }
+.zone-head .sub { color: var(--fg-dim); font-size: 12px; }
+.zone-warn { color: var(--accent); font-size: 12px; margin: 0 0 6px; }
+.zone-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; font-size: 13px; }
+.zone-chip { background: var(--bg-3); border-radius: var(--radius); padding: 2px 8px; }
+.zone-actions { display: flex; flex-wrap: wrap; gap: 6px; }

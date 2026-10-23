@@ -948,6 +948,33 @@ Once a status is paired, it works in both directions:
   own sheet or from *+ Condition* and `×` on a party row; a player's panel asks
   the GM's bridge over sync, so it needs the GM's panel open.
 
+## Spell zones
+
+A spell with an area (D&D Beyond's "20 ft. Sphere", the SRD's shape and size, or
+"20-foot-radius Sphere" in its text) gets a *Zone* button on its card. It opens
+TaleSpire's own ruler already set to the right shape; drag it out and let go,
+and a card lists who's inside.
+
+- **Shapes.** Sphere, cylinder and emanation use the sphere ruler; cone and line
+  their own. The API's ruler has no cube, so a cube is placed with the sphere
+  ruler, centre to the middle of a face, and checked as a square.
+- **Who counts.** 5e counts a creature if any part of its space is in the area,
+  so each mini counts as a disc half its size across (one tile for Medium, two
+  for Large). Close to the grid rule, not identical.
+- **Who's checked.** On the GM's machine with the bridge: every mini on the
+  board. A GM without it: the party, linked fight minis and anything lassoed. A
+  player's panel asks the GM's panel, which checks every mini it can see and
+  answers with the names inside, leaving hidden minis out. If no GM panel
+  answers in a couple of seconds, it checks the player's own mini and anything
+  they've lassoed, and says so.
+- **The ruler's size.** If the ruler is more than half a tile off the spell's
+  size, the card says so: it measures, it can't resize.
+- **Keep on board.** Leaves the area on the board as one of TaleSpire's area
+  markers, through the GM's bridge (a player's panel asks the GM's). For a
+  concentration spell it becomes your concentration, so dropping concentration,
+  or casting another concentration spell, clears it from the board.
+- *Post to chat* lists who's inside, leaving hidden minis out.
+
 ## The GM's monster attacks
 
 The table rolls and a person calls hit or miss, as before. The exception is the

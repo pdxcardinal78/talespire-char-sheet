@@ -129,6 +129,7 @@ includes each mini's `position` and `rotation`, so an area-of-effect helper
 | `GET /whoami` | Whether this client has GM rights |
 | `GET /selected` | The selected mini: id, name, HP, persistent emote ids |
 | `GET /creature?id=` | The same for any mini on the board |
+| `GET /creatures` | Every mini on the board: `[{ id, name, x, y, z, scale, hidden }]`, positions in tiles. Read by reflection from `CreatureManager._creaturesData`; the symbiote API has no "all minis" call. Added in 0.4.1 |
 | `GET /statuses` | TaleSpire's statuses (persistent emotes) by name: `[{ id, name, icon }]`, from `EmoteManager.GetCollection()`. Added in 0.4.0 |
 | `POST /hp?id=&value=&max=` | Set HP; `max` optional. GM only |
 | `POST /stat?id=&index=&value=&max=` | Set one of the campaign's 8 named stats (index 0 to 7), e.g. a Temp HP stat; `max` optional. GM only. Added in 0.3.0 |
