@@ -462,6 +462,36 @@ a saving throw is treated as a save spell. And healing spells put their dice in
 `damage_roll` with no `damage_types`, which is how Cure Wounds is recognised as
 healing rather than damage.
 
+## Class resources
+
+**Riders on a hit.** When a weapon attack is called a hit, the damage card lists
+what the hit could add (`lib/classfx.js`). Tap one to add its dice; the Damage
+and Crit buttons show the total, and a crit doubles the riders' dice too.
+
+- **Smite spells** you have (Divine Smite, Searing Smite, Shining Smite...), on
+  melee weapon hits, with a slot-level picker. The slot is spent, and the cast
+  announced, when you roll the damage.
+- **Hunter's Mark / Hex** while you're concentrating on it: already ticked.
+  Hunter's Mark adds to weapon hits, Hex to any attack.
+- **Sneak Attack**: half your rogue level in d6 (rounded up), on a finesse or
+  ranged weapon. Once per turn during initiative; whether you have advantage
+  or an ally beside the target is your call.
+- **Radiant Strikes / Improved Divine Smite**: +1d8 radiant on melee weapon
+  hits, ticked.
+
+Nothing is added without a tap except those last two and an active mark, which
+the rules make automatic.
+
+**Point pools.** A resource spent in amounts (Lay on Hands, Sorcery Points, or
+anything with more than eight uses) gets a number box instead of pips. Lay on
+Hands heals: with no one else targeted it heals you, otherwise it announces who.
+
+**Feature options with an area or a duration.** An option whose text names an
+area around you ("each Undead within 30 ft. of you", "a 30-foot Emanation") gets
+a Zone button, like a spell. One that runs for a while ("for 1 minute") starts a
+timed effect when used, which counts down with the turn tracker and ends itself.
+Turn Undead does both.
+
 ## Attacks, damage, and upcasting
 
 **Attack and damage are separate rolls.** Clicking an attack rolls the d20 only and

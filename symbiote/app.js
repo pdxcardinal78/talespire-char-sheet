@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.19.0";
+  const APP_VERSION = "0.20.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1094,6 +1094,8 @@ const App = (() => {
       ability: effect.ability || null,
       die: effect.die || null,
       damageType: effect.damageType || null,
+      // A timer with no roll bonus (Turn Undead's minute) says what it is instead
+      note: effect.note || null,
       active: true,
       // Set when the effect came from somebody else's panel.
       fromId: effect.fromId || null,
@@ -1198,6 +1200,8 @@ const App = (() => {
         ended.push(fx.name);
       }
       if (me && b.of === me && b.at === "start") await startMyTurn();
+      // Once per turn means anyone's turn: an opportunity attack can sneak too
+      else if (b.at === "start" && play.turn?.mine) play.turn.mine.sneak = false;
     }
     renderEffects();
     savePlay();
@@ -2060,7 +2064,7 @@ const App = (() => {
       pill.className = `pill pill-buff${fx.active ? "" : " is-off"}`;
       pill.textContent = fx.name;
       pill.title = [
-        fx.weapon ? `${fx.weapon}` : `${signedBonus(fx.bonus)} to ${fx.targets.join(", ")}`,
+        fx.weapon ? `${fx.weapon}` : (fx.targets || []).length ? `${signedBonus(fx.bonus)} to ${fx.targets.join(", ")}` : fx.note,
         fx.expires ? describeExpiry(fx) : null,
         fx.fromName ? `from ${fx.fromName}` : null,
         fx.active ? null : "suspended",
@@ -2093,11 +2097,12 @@ const App = (() => {
       const RECEIPT = { pending: "…", accepted: "✓", declined: "✗", chat: "chat", failed: "!" };
       const receipts = (fx.grantedTo || []).map((r) => `${r.name} ${RECEIPT[r.status] || ""}`).join(", ");
 
+      const timerOnly = !fx.weapon && !(fx.targets || []).length;
       const detail = [
-        fx.weapon ? fx.weapon : signedBonus(fx.bonus),
+        timerOnly ? fx.note || null : fx.weapon ? fx.weapon : signedBonus(fx.bonus),
         fx.die ? `${fx.die}${fx.damageType ? ` ${fx.damageType}` : ""}` : null,
         fx.ability ? `uses ${fx.ability.toUpperCase()}` : null,
-        fx.weapon ? null : fx.targets.join(", "),
+        fx.weapon || timerOnly ? null : fx.targets.join(", "),
         fx.once ? "once" : null,
         fx.conc ? "concentration" : null,
         fx.expires ? describeExpiry(fx) : null,
@@ -2649,27 +2654,48 @@ const App = (() => {
     box.appendChild(drop);
   }
 
+  /** The riders a hit could take, from the sheet as it stands now. */
+  function hitRiders(hit) {
+    const s = state.sheet;
+    if (!s) return [];
+    const mine = s.play.turn?.mine;
+    const slotLevels = [];
+    for (const slot of s.spellcasting?.slots || []) {
+      if (slot.available) slotLevels.push({ level: slot.level, left: slot.available - (s.play.slotsUsed[slot.level] || 0), kind: "slot" });
+    }
+    const pact = s.spellcasting?.pact;
+    if (pact) slotLevels.push({ level: pact.level, left: pact.available - (s.play.pactUsed || 0), kind: "pact" });
+    return ClassFx.ridersFor(
+      { spells: allSpells(s), features: s.features, identity: s.identity },
+      { ...hit, concentration: s.play.concentration?.name || "", sneakUsed: Boolean(mine?.sneak) && Boolean(turnQueue?.items?.length), slotLevels },
+      (sp, level) => DDB.upcastRolls(sp, level).damage
+    );
+  }
+
   function renderPending() {
     const box = $("pending-damage");
     box.replaceChildren();
     box.classList.toggle("hidden", state.pending.length === 0);
 
     for (const entry of state.pending) {
+      const card = document.createElement("div");
+      card.className = "pending-card card";
       const row = document.createElement("div");
       row.className = "pending-row";
 
       const label = document.createElement("span");
       label.className = "pending-label";
-      label.textContent = `${entry.name} hit for ${entry.total}${entry.crit ? " — CRIT" : ""}`;
+      label.innerHTML = `<b>Hit!</b> ${escapeHtml(entry.name)} rolled ${entry.total}${entry.crit ? " · <b>CRIT</b>" : ""}`;
       row.appendChild(label);
 
+      const dmg = ClassFx.withRiders(entry.damage, entry.riders || []);
       if (entry.crit) {
         row.appendChild(
-          button(`Crit ${Rolls.critical(entry.damage)}`, "btn-primary", (mode) => rollPending(entry, true, mode))
+          button(`Crit ${Rolls.critical(dmg)}`, "btn-gold is-fill", (mode) => rollPending(entry, true, mode))
         );
       }
       row.appendChild(
-        button(`Damage ${entry.damage}`, entry.crit ? "" : "btn-primary", (mode) => rollPending(entry, false, mode))
+        button(`Damage ${dmg}`, entry.crit ? "btn-gold" : "btn-gold is-fill", (mode) => rollPending(entry, false, mode))
       );
 
       const dismiss = document.createElement("button");
@@ -2680,17 +2706,80 @@ const App = (() => {
         renderPending();
       };
       row.appendChild(dismiss);
+      card.appendChild(row);
 
-      box.appendChild(row);
+      if (entry.riders?.length) {
+        const riders = document.createElement("div");
+        riders.className = "riders";
+        for (const r of entry.riders) riders.appendChild(riderChip(entry, r));
+        card.appendChild(riders);
+      }
+      box.appendChild(card);
     }
+  }
+
+  /** One rider: tap to add it to the damage; a smite also picks its slot level. */
+  function riderChip(entry, r) {
+    const wrap = document.createElement("span");
+    wrap.className = "rider";
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `rider-chip${r.on ? " is-on" : ""}`;
+    chip.disabled = Boolean(r.disabled);
+    chip.setAttribute("aria-pressed", r.on ? "true" : "false");
+    chip.innerHTML = `${r.on ? "✓" : "+"} ${escapeHtml(r.name)} <b>${escapeHtml(r.dice || "")}</b>` +
+      (r.note ? ` <small>${escapeHtml(r.note)}</small>` : "");
+    chip.title = r.kind === "smite"
+      ? `Cast ${r.name} with this hit; the slot is spent when you roll damage`
+      : r.kind === "sneak" ? "Once per turn, with advantage or an ally beside the target" : "";
+    chip.onclick = () => {
+      r.on = !r.on;
+      renderPending();
+    };
+    wrap.appendChild(chip);
+
+    if (r.kind === "smite" && r.levels.length > 1) {
+      const pick = document.createElement("select");
+      pick.className = "rider-level";
+      pick.setAttribute("aria-label", `${r.name} slot level`);
+      for (const o of r.levels) {
+        const opt = document.createElement("option");
+        opt.value = `${o.kind}:${o.level}`;
+        opt.textContent = `${o.kind === "pact" ? "Pact " : "L"}${o.level} (${o.left})`;
+        opt.disabled = o.left <= 0;
+        pick.appendChild(opt);
+      }
+      pick.value = `${r.slotKind}:${r.level}`;
+      pick.onchange = () => {
+        const [kind, lvl] = pick.value.split(":");
+        r.slotKind = kind;
+        r.level = Number(lvl);
+        r.dice = DDB.upcastRolls(r.spell, r.level).damage || r.dice;
+        r.on = true;
+        renderPending();
+      };
+      wrap.appendChild(pick);
+    }
+    return wrap;
   }
 
   async function rollPending(entry, crit, mode) {
     state.pending = state.pending.filter((e) => e !== entry);
     renderPending();
+    const riders = (entry.riders || []).filter((r) => r.on && !r.disabled);
+    // Pay for what was added: a smite's slot, Sneak Attack's once per turn
+    for (const r of riders) {
+      if (r.kind === "smite") await castSpell(r.spell, r.level, r.slotKind);
+      if (r.kind === "sneak" && turnQueue?.items?.length) {
+        ensureMine().sneak = true;
+        savePlay();
+      }
+    }
+    const damage = ClassFx.withRiders(entry.damage, riders);
+    const added = riders.map((r) => r.name);
     await doRoll({
-      name: `${entry.name} damage${crit ? " (crit)" : ""}`,
-      damage: crit ? Rolls.critical(entry.damage) : entry.damage,
+      name: `${entry.name} damage${crit ? " (crit)" : ""}${added.length ? ` + ${added.join(", ")}` : ""}`,
+      damage: crit ? Rolls.critical(damage) : damage,
       mode,
       kind: "damage",
     });
@@ -2715,12 +2804,6 @@ const App = (() => {
     const box = $("conditions");
     box.replaceChildren();
 
-    if (!play.conditions.length) {
-      const empty = document.createElement("span");
-      empty.className = "hint";
-      empty.textContent = "No conditions";
-      box.appendChild(empty);
-    }
 
     for (const c of play.conditions) {
       const chip = document.createElement("span");
@@ -3018,7 +3101,10 @@ const App = (() => {
       hit.title = `Roll ${a.name} to hit. Shift-click for advantage, Ctrl-click for disadvantage.`;
       hit.innerHTML = `<span>To hit</span><b>${escapeHtml(DDB.signed(a.toHit))}</b>`;
       hit.onclick = (ev) =>
-        doRoll({ name: a.name, roll: a.attackRoll, mode: modeFromEvent(ev), kind: "attack", damage: null, parkedDamage: a.damageRoll });
+        doRoll({
+          name: a.name, roll: a.attackRoll, mode: modeFromEvent(ev), kind: "attack", damage: null, parkedDamage: a.damageRoll,
+          hit: { weapon: true, melee: a.kind === "melee", finesse: (a.properties || []).includes("Finesse") },
+        });
       const dmg = document.createElement("div");
       dmg.className = "roll-tile";
       dmg.title = "Rolled once the hit is called";
@@ -3069,6 +3155,7 @@ const App = (() => {
 
   /** A limited-use feature: name, pips, Use. Its options and text open on tap. */
   function resourceRow(s, r) {
+    if (ClassFx.isPool(r)) return poolRow(s, r);
     const used = s.play.resourcesUsed[r.name] || 0;
     const left = r.max - used;
     const spend = () => {
@@ -3097,6 +3184,91 @@ const App = (() => {
     const foot = row.querySelector(".feature-foot");
     foot.insertAdjacentHTML("afterbegin", `<span class="hint">Back on a ${escapeHtml(r.resetsOn)}.</span>`);
     foot.appendChild(undo);
+    return row;
+  }
+
+  /**
+   * A pool spent in amounts: Lay on Hands, Sorcery Points. Type how many and
+   * spend them; Lay on Hands heals that much, you if no one else is targeted.
+   */
+  function poolRow(s, r) {
+    const used = s.play.resourcesUsed[r.name] || 0;
+    const left = Math.max(0, r.max - used);
+    const heals = ClassFx.poolHeals(r);
+    const row = document.createElement("div");
+    row.className = "feature is-pool";
+    const open = openFeatures.has(r.name);
+    row.classList.toggle("is-open", open);
+
+    const head = document.createElement("div");
+    head.className = "feature-head";
+    const name = document.createElement("button");
+    name.className = "feature-name";
+    name.innerHTML = `<b>${escapeHtml(r.name)}</b><small>${escapeHtml(firstSentence(r.description))}</small>`;
+    name.onclick = () => {
+      if (openFeatures.has(r.name)) openFeatures.delete(r.name);
+      else openFeatures.add(r.name);
+      renderResources(s);
+    };
+    const count = document.createElement("span");
+    count.className = "feature-count";
+    count.innerHTML = `<b>${left}</b>/${r.max}`;
+    count.title = `Back on a ${r.resetsOn}`;
+    const amount = document.createElement("input");
+    amount.type = "number";
+    amount.min = "1";
+    amount.max = String(left);
+    amount.placeholder = "pts";
+    amount.className = "pool-amount";
+    amount.setAttribute("aria-label", `${r.name}: how many`);
+    const go = document.createElement("button");
+    go.className = "btn btn-small btn-gold feature-use";
+    go.textContent = heals ? "Heal" : "Spend";
+    go.disabled = left <= 0;
+    go.onclick = async () => {
+      const n = parseInt(amount.value, 10);
+      if (!Number.isFinite(n) || n <= 0) return toast(`How many ${heals ? "hit points" : "points"}?`, true);
+      if (n > left) return toast(`Only ${left} left in ${r.name}.`, true);
+      s.play.resourcesUsed[r.name] = used + n;
+      savePlay();
+      renderResources(s);
+      const target = state.target && state.target.id !== state.creatureId ? state.target : null;
+      if (heals) {
+        await announce(`uses ${Rolls.bold(r.name)}: restores ${n} HP${target ? ` to ${escapeText(target.name)}` : ""}`);
+        if (!target) {
+          applyHp(n);
+          toast(`Healed yourself ${n}. Pick a target first to heal someone else.`);
+        }
+      } else {
+        await announce(`spends ${n} ${Rolls.bold(r.name)}`);
+      }
+    };
+    amount.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") go.click();
+    });
+    head.append(name, count, amount, go);
+    row.appendChild(head);
+
+    if (open) {
+      const body = document.createElement("p");
+      body.className = "option-detail feature-body";
+      body.textContent = r.description || "";
+      row.appendChild(body);
+      const foot = document.createElement("div");
+      foot.className = "feature-foot";
+      foot.innerHTML = `<span class="hint">Back on a ${escapeHtml(r.resetsOn)}.</span>`;
+      const back = document.createElement("button");
+      back.className = "link-btn";
+      back.textContent = "refill";
+      back.disabled = used <= 0;
+      back.onclick = () => {
+        s.play.resourcesUsed[r.name] = 0;
+        renderResources(s);
+        savePlay();
+      };
+      foot.appendChild(back);
+      row.appendChild(foot);
+    }
     return row;
   }
 
@@ -3164,17 +3336,43 @@ const App = (() => {
    * The choice menu shared by limited-use resources and free options.
    * `spend` is null for things that cost nothing.
    */
+  // The option last picked for each feature, so spending a use doesn't reset it
+  const chosenOptions = new Map();
+
   function optionRow(owner, spend, left = Infinity) {
     const box = document.createElement("div");
     box.className = "option-row";
 
     const options = owner.options || [];
-    let selected = options[0] || null;
+    let selected = options[chosenOptions.get(owner.name) || 0] || options[0] || null;
 
     const detail = document.createElement("p");
     detail.className = "option-detail";
 
+    // An option with an area gets a Zone button, like a spell's
+    const extras = document.createElement("div");
+    extras.className = "option-extras";
+    function drawExtras() {
+      extras.replaceChildren();
+      const subject = selected || owner;
+      const area = ClassFx.areaOf(subject, Zones.areaOf);
+      if (area) {
+        const z = button(`◇ Zone ${Zones.describeArea(area)}`, "btn-ghost", () =>
+          Zones.cast({ name: subject.name, aoe: `${area.size} ft. ${area.shape}`, description: "" }));
+        z.title = "Place TaleSpire's ruler for this area and see who's inside";
+        extras.appendChild(z);
+      }
+      const lasts = ClassFx.lastsOf(subject);
+      if (lasts) {
+        const note = document.createElement("span");
+        note.className = "hint";
+        note.textContent = `Using it starts a ${Turns.LASTS[lasts].label.toLowerCase()} timer.`;
+        extras.appendChild(note);
+      }
+    }
+
     function describe() {
+      drawExtras();
       if (!selected) {
         detail.textContent = owner.description || "";
         return;
@@ -3197,8 +3395,10 @@ const App = (() => {
         opt.textContent = o.name + (o.roll ? ` (${o.roll})` : "");
         pick.appendChild(opt);
       }
+      pick.value = String(Math.max(0, options.indexOf(selected)));
       pick.onchange = () => {
         selected = options[Number(pick.value)];
+        chosenOptions.set(owner.name, Number(pick.value));
         describe();
       };
       box.appendChild(pick);
@@ -3215,6 +3415,19 @@ const App = (() => {
       const save = selected?.save ? ` — ${selected.save.ability} save DC ${selected.save.dc}` : "";
       await announce(`uses ${Rolls.bold(label)}${save}`);
 
+      // An option that runs for a while gets a timed effect, so it ends itself
+      const lasts = ClassFx.lastsOf(selected || owner);
+      if (lasts) {
+        const area = ClassFx.areaOf(selected || owner, Zones.areaOf);
+        addEffect({
+          name: selected ? selected.name : owner.name,
+          bonus: "+0",
+          targets: [],
+          lasts,
+          note: [area ? Zones.describeArea(area) : null, selected?.save ? `${selected.save.ability.slice(0, 3).toUpperCase()} DC ${selected.save.dc}` : null].filter(Boolean).join(" · "),
+        });
+      }
+
       // Roll whatever the chosen option actually rolls.
       if (selected?.roll) {
         // Not necessarily damage — Divine Spark's 1d8 is a heal or a hit depending
@@ -3225,7 +3438,7 @@ const App = (() => {
     box.appendChild(use);
 
     describe();
-    box.appendChild(detail);
+    box.append(detail, extras);
     return box;
   }
 
@@ -3636,6 +3849,7 @@ const App = (() => {
               mode,
               kind: "attack",
               parkedDamage: rolls.damage,
+              hit: { spellAttack: true },
             })
           )
         );
@@ -4105,7 +4319,7 @@ const App = (() => {
         mode: spec.mode || state.mode,
         // parkedDamage rides along so the result handler can arm a damage button
         // once the DM calls the hit.
-        context: { kind: spec.kind, target: state.target, parkedDamage: spec.parkedDamage || null },
+        context: { kind: spec.kind, target: state.target, parkedDamage: spec.parkedDamage || null, hit: spec.hit || null },
       });
       renderStaged();
 
@@ -4185,6 +4399,8 @@ const App = (() => {
         damage: ctx.parkedDamage,
         total: summary.total,
         crit: summary.natural === 20,
+        // What this hit could add: smites, a mark, Sneak Attack (lib/classfx.js)
+        riders: ctx.hit ? hitRiders(ctx.hit) : [],
       });
       renderPending();
     }
@@ -4722,7 +4938,7 @@ const App = (() => {
     encounterBoardTimer = setTimeout(refreshBoardHp, 150);
   }
 
-  return { boot, wire, onCreatureEvent, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, state };
+  return { boot, wire, onCreatureEvent, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, render, state };
 })();
 
 // ---------------------------------------------------------------------------
