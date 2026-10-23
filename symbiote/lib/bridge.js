@@ -165,6 +165,10 @@ const Bridge = (() => {
       const params = { ruler: String(rulerId), name: String(name || "").slice(0, 50) };
       if (geometry?.kind && geometry?.handles) Object.assign(params, { kind: geometry.kind, handles: geometry.handles });
       const r = await transport("POST", "/zone", params);
+      if (r?.ok && !r.from) {
+        // Bridge 0.4.0 and 0.4.1 answer ok but TaleSpire drops the marker
+        return { ok: false, error: `the bridge plugin running in TaleSpire is ${status.version || "older than 0.4.2"} and can't keep zones. Quit TaleSpire, run plugin/install-mac.sh, and relaunch` };
+      }
       return r?.ok ? { ok: true, id: r.id, from: r.from } : { ok: false, error: r?.error || "refused" };
     } catch {
       return { ok: false, error: "bridge unreachable" };

@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.17.2";
+  const APP_VERSION = "0.17.3";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
