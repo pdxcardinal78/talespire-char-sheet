@@ -100,6 +100,11 @@ const Party = (() => {
     await broadcast({ t: "tmp", c: creatureId, tp: temp });
   }
 
+  /** Temp HP an effect gives a creature (Twilight Sanctuary). Its panel keeps the larger pool. */
+  async function tempGrant(creatureId, temp, source) {
+    await broadcast({ t: "tg", c: creatureId, tp: temp, n: String(source || "").slice(0, 60) });
+  }
+
   /** The GM telling a player's panel it took damage, when there's no bridge to write the mini. */
   async function hit(creatureId, amount, source) {
     await broadcast({ t: "hit", c: creatureId, a: amount, n: String(source || "").slice(0, 60) });
@@ -202,6 +207,8 @@ const Party = (() => {
       handlers.onVitals({ creatureId: msg.c, hp: msg.h, max: msg.m, temp: msg.tp });
     } else if (msg.t === "tmp" && handlers.onTemp) {
       handlers.onTemp({ creatureId: msg.c, temp: msg.tp });
+    } else if (msg.t === "tg" && handlers.onTempGrant) {
+      handlers.onTempGrant({ creatureId: msg.c, temp: msg.tp, source: msg.n });
     } else if (msg.t === "hit" && handlers.onHit) {
       handlers.onHit({ creatureId: msg.c, amount: msg.a, source: msg.n });
     } else if (msg.t === "sm" && handlers.onStatusMapping) {
@@ -248,7 +255,7 @@ const Party = (() => {
   }
 
   return {
-    configure, grant, revoke, acknowledge, reportVitals, setTemp, hit,
+    configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, tempGrant,
     statusMapping, requestStatusMappings, condition,
     zoneQuery, zoneReply, zoneKeep, zoneKept, zoneRemove,
     receive, reachablePlayers, MAX_MESSAGE,

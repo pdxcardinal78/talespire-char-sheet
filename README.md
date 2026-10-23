@@ -492,6 +492,18 @@ a Zone button, like a spell. One that runs for a while ("for 1 minute") starts a
 timed effect when used, which counts down with the turn tracker and ends itself.
 Turn Undead does both.
 
+**Effects that act every turn.** Some run for a minute and give something each
+turn: Twilight Sanctuary grants 1d6 + your cleric level as temp HP to a creature
+that ends its turn in it. The text is read for "whenever a creature ends (or
+starts) its turn" or "at the start/end of each of your turns", and the dice,
+with "plus your Cleric level" filled in. Such an effect gets a **↻** button on
+its row to roll it any time, and during initiative a prompt appears as each
+turn ends: *Twilight Sanctuary · Doran's turn ended* with *Roll 1d6+2 temp HP*
+or *Skip*. If the zone is open on the card, the prompt says whether that
+creature is inside. Temp HP rolled for you applies at once; for someone else it
+goes to their panel over sync, which keeps the larger pool (temp HP doesn't
+stack). One prompt per effect is kept: a newer turn replaces an unanswered one.
+
 ## Attacks, damage, and upcasting
 
 **Attack and damage are separate rolls.** Clicking an attack rolls the d20 only and

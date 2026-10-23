@@ -145,7 +145,49 @@ const ClassFx = (() => {
     return "";
   }
 
-  return { ridersFor, withRiders, isPool, poolHeals, areaOf, lastsOf };
+  /**
+   * Something an effect does again every turn, read from its text:
+   *   "Whenever any creature ... ends its turn in the sphere ... Temporary Hit
+   *    Points equal to 1d6 plus your Cleric level"     (Twilight Sanctuary)
+   *   "At the start of each of your turns ..."         (your own turns only)
+   * Returns { at, whose: "any" | "own", roll, benefit: "temp"|"healing"|"damage", label }
+   * or null. `ctx.levelOf(className)` and `ctx.spellMod` resolve "plus your
+   * Cleric level" and "your spellcasting ability modifier".
+   */
+  function recurOf(subject, ctx = {}) {
+    const text = String(subject?.description || "").replace(/\s+/g, " ");
+    let at = null;
+    let whose = null;
+    let m = /whenever (?:any|a|each) creature\b[^.]*?\b(ends|starts) its turn/i.exec(text);
+    if (m) {
+      at = m[1].toLowerCase() === "ends" ? "end" : "start";
+      whose = "any";
+    } else if ((m = /at the (start|end) of each of your turns/i.exec(text))) {
+      at = m[1].toLowerCase();
+      whose = "own";
+    }
+    if (!at) return null;
+
+    // The part after the trigger says what happens
+    const rest = text.slice(m.index);
+    let roll = null;
+    const lvl = /(\d+d\d+)\s*(?:\+|plus)\s*your (\w+) level/i.exec(rest);
+    if (lvl) {
+      const n = ctx.levelOf ? ctx.levelOf(lvl[2]) : 0;
+      roll = n ? `${lvl[1]}+${n}` : lvl[1];
+    } else if (/equal to your spellcasting ability modifier/i.test(rest) && ctx.spellMod != null) {
+      roll = String(Math.max(1, ctx.spellMod));
+    } else {
+      const dice = /(\d+d\d+(?:\s*\+\s*\d+)?)/.exec(rest);
+      roll = dice ? dice[1].replace(/\s+/g, "") : null;
+    }
+    if (!roll) return null;
+
+    const benefit = /temporary hit points/i.test(rest) ? "temp" : /\b(regains?|restores?|heals?)\b/i.test(rest) ? "healing" : "damage";
+    return { at, whose, roll, benefit, label: benefit === "temp" ? "temp HP" : benefit };
+  }
+
+  return { ridersFor, withRiders, isPool, poolHeals, areaOf, lastsOf, recurOf };
 })();
 
 if (typeof window !== "undefined") window.ClassFx = ClassFx;

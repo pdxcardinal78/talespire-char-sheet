@@ -1781,3 +1781,10 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 .option-extras { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .option-extras:empty { display: none; }
 .option-extras .hint { margin: 0; }
+
+/* ---------- every-turn prompts (Twilight Sanctuary) ---------- */
+
+.turn-prompts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.turn-prompt { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border-color: var(--info); background: linear-gradient(var(--info-bg), var(--info-bg)), var(--card); }
+.turn-prompt-text { flex: 1 1 100%; font-size: 13px; }
+.turn-prompt-text b { color: var(--info); }

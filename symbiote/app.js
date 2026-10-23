@@ -51,6 +51,7 @@ const App = (() => {
 
       Party.configure({
         onGrant: onEffectGranted,
+        onTempGrant,
         onRevoke: onEffectRevoked,
         onAck: onEffectAck,
         onVitals: onVitalsFromPlayer,
@@ -146,7 +147,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.20.0";
+  const APP_VERSION = "0.20.1";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1096,6 +1097,8 @@ const App = (() => {
       damageType: effect.damageType || null,
       // A timer with no roll bonus (Turn Undead's minute) says what it is instead
       note: effect.note || null,
+      // Something it does every turn (Twilight Sanctuary's temp HP); see lib/classfx.js
+      recur: effect.recur || null,
       active: true,
       // Set when the effect came from somebody else's panel.
       fromId: effect.fromId || null,
@@ -1193,6 +1196,7 @@ const App = (() => {
     const me = state.creatureId;
     const ended = [];
     for (const b of boundaries) {
+      queueRecurPrompts(b, me);
       for (const fx of Turns.tick(play.effects, b, me)) {
         if (!play.effects.includes(fx)) continue;
         if (play.concentration?.effectId === fx.id) await endConcentration({ silent: true });
@@ -1354,6 +1358,82 @@ const App = (() => {
     const show = Boolean(state.sheet) && (inInit || hasTarget);
     $("combat-card").classList.toggle("hidden", !show);
     $("pick-target-pill").classList.toggle("hidden", show || !state.sheet);
+  }
+
+  // --- effects that act every turn -----------------------------------------
+
+  /** What "plus your Cleric level" and "your spellcasting modifier" mean for this sheet. */
+  function recurContext() {
+    const s = state.sheet;
+    const caster = s?.spellcasting?.blocks?.find((b) => b.ability);
+    return {
+      levelOf: (cls) => (s?.identity?.classes || []).filter((c) => c.name.toLowerCase() === String(cls).toLowerCase()).reduce((t, c) => t + (c.level || 0), 0),
+      spellMod: caster && caster.attackBonus != null ? caster.attackBonus - (s.proficiencyBonus || 0) : null,
+    };
+  }
+
+  const turnPrompts = []; // { fx, recipient: { id, name }, at }
+
+  /** A turn boundary: offer each running effect that acts on it. */
+  function queueRecurPrompts(b, me) {
+    for (const fx of state.sheet.play.effects) {
+      const r = fx.recur;
+      if (!r || !fx.active || r.at !== b.at) continue;
+      const owner = fx.expires?.of ?? me;
+      if (r.whose === "own" && b.of !== owner) continue;
+      const recipient = r.whose === "own"
+        ? { id: me, name: "you" }
+        : { id: b.of, name: b.of === me ? "you" : (turnQueue?.items || []).find((i) => i.id === b.of)?.name || "that creature" };
+      // One prompt per effect: a newer turn replaces an unanswered older one
+      const old = turnPrompts.findIndex((p) => p.fx.id === fx.id);
+      if (old !== -1) turnPrompts.splice(old, 1);
+      turnPrompts.push({ fx, recipient, at: b.at });
+    }
+    renderTurnPrompts();
+  }
+
+  function renderTurnPrompts() {
+    const box = $("turn-prompts");
+    box.replaceChildren();
+    box.classList.toggle("hidden", !turnPrompts.length);
+    for (const p of turnPrompts) {
+      const card = document.createElement("div");
+      card.className = "turn-prompt card";
+      const r = p.fx.recur;
+      const whose = p.recipient.name === "you" ? "Your" : `${p.recipient.name}'s`;
+      // A kept zone for this effect says whether they're actually in it
+      let where = "";
+      if (zoneShown && zoneShown.spell?.name === p.fx.name && p.recipient.id) {
+        where = zoneShown.inside.some((c) => c.id === p.recipient.id) ? " · inside" : " · not inside";
+      }
+      card.innerHTML = `<span class="turn-prompt-text"><b>${escapeHtml(p.fx.name)}</b> · ${escapeHtml(whose)} turn ${p.at === "end" ? "ended" : "started"}${escapeHtml(where)}</span>`;
+      card.appendChild(button(`Roll ${r.roll} ${r.label}`, "btn-gold is-fill", (mode) => {
+        turnPrompts.splice(turnPrompts.indexOf(p), 1);
+        renderTurnPrompts();
+        rollRecur(p.fx, p.recipient, mode);
+      }));
+      card.appendChild(button("Skip", "btn-ghost", () => {
+        turnPrompts.splice(turnPrompts.indexOf(p), 1);
+        renderTurnPrompts();
+      }));
+      box.appendChild(card);
+    }
+  }
+
+  /** Roll an effect's every-turn benefit for someone; temp HP lands when the dice do. */
+  function rollRecur(fx, recipient, mode) {
+    const r = fx.recur;
+    const forWho = recipient?.name && recipient.name !== "you" ? ` for ${recipient.name}` : "";
+    return doRoll({
+      name: `${fx.name}: ${r.label}${forWho}`,
+      damage: r.roll,
+      damageName: `${fx.name} ${r.label}`,
+      mode,
+      kind: r.benefit === "temp" ? "temp" : r.benefit === "healing" ? "healing" : "damage",
+      tempFor: recipient?.id || state.creatureId,
+      tempName: recipient?.name || "you",
+      source: fx.name,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -2138,6 +2218,15 @@ const App = (() => {
       remove.textContent = "×";
       remove.title = fx.fromId ? "Remove" : "Remove (and withdraw from anyone holding it)";
       remove.onclick = () => dismissEffect(fx);
+      // An effect that gives something every turn can be rolled by hand any time
+      if (fx.recur && fx.active) {
+        const again = button(`↻ ${fx.recur.roll} ${fx.recur.label}`, "btn-gold", (mode) =>
+          rollRecur(fx, { id: state.creatureId, name: "you" }, mode));
+        again.title = fx.recur.whose === "any"
+          ? `Roll ${fx.name} for yourself. During initiative you're offered it as each creature's turn ${fx.recur.at === "end" ? "ends" : "starts"}.`
+          : `Roll ${fx.name}`;
+        row.appendChild(again);
+      }
       remove.textContent = "End";
       remove.className = "btn btn-small btn-gold is-fill";
 
@@ -2318,6 +2407,21 @@ const App = (() => {
   }
 
   /** The GM set this character's temp pool (campaigns without a Temp HP stat). */
+  /**
+   * Temp HP someone gave you (Twilight Sanctuary): it doesn't stack, so the
+   * bigger pool wins, same as granting it yourself.
+   */
+  function onTempGrant({ creatureId, temp, source }) {
+    if (!state.sheet || creatureId !== state.creatureId) return;
+    const n = Math.max(0, Math.round(Number(temp) || 0));
+    if (n > (state.sheet.play.hp.temp || 0)) {
+      grantTempHp(n);
+      toast(`${source || "An effect"} gave you ${n} temp HP.`);
+    } else {
+      toast(`${source || "An effect"} offered ${n} temp HP; you already have ${state.sheet.play.hp.temp}.`);
+    }
+  }
+
   function onTempFromGm({ creatureId, temp }) {
     if (!state.sheet || creatureId !== state.creatureId) return;
     state.sheet.play.hp.temp = Math.max(0, Number(temp) || 0);
@@ -3424,6 +3528,7 @@ const App = (() => {
           bonus: "+0",
           targets: [],
           lasts,
+          recur: ClassFx.recurOf(selected || owner, recurContext()),
           note: [area ? Zones.describeArea(area) : null, selected?.save ? `${selected.save.ability.slice(0, 3).toUpperCase()} DC ${selected.save.dc}` : null].filter(Boolean).join(" · "),
         });
       }
@@ -4319,7 +4424,10 @@ const App = (() => {
         mode: spec.mode || state.mode,
         // parkedDamage rides along so the result handler can arm a damage button
         // once the DM calls the hit.
-        context: { kind: spec.kind, target: state.target, parkedDamage: spec.parkedDamage || null, hit: spec.hit || null },
+        context: {
+          kind: spec.kind, target: state.target, parkedDamage: spec.parkedDamage || null, hit: spec.hit || null,
+          ...(spec.kind === "temp" ? { tempFor: spec.tempFor || null, tempName: spec.tempName || null, source: spec.source || null } : {}),
+        },
       });
       renderStaged();
 
@@ -4362,6 +4470,18 @@ const App = (() => {
       line += ` ${Rolls.dim("healed")}`;
     }
 
+    // Temp HP from an effect: yours applies here, anyone else's goes to their panel
+    if (ctx.kind === "temp" && summary.damage != null) {
+      const amount = summary.damage;
+      if (!ctx.tempFor || ctx.tempFor === state.creatureId) {
+        grantTempHp(amount);
+        line += ` ${Rolls.dim("temp HP")}`;
+      } else {
+        line += ` ${Rolls.dim(`temp HP for ${escapeText(ctx.tempName || "them")}`)}`;
+        await Party.tempGrant(ctx.tempFor, amount, ctx.source).catch(() => {});
+      }
+    }
+
     // The extra dice of a monster's crit, rolled after the attack landed
     if (ctx.kind === "critExtra") {
       await applyMonsterDamage(ctx.target, (ctx.base || 0) + (summary.damage || 0), ctx.source, ctx.creatureId, true);
@@ -4383,7 +4503,7 @@ const App = (() => {
     // monster's, is the same number needing the same target — and the roll
     // tracker having claimed these dice is an implementation detail, not a
     // reason for them to skip the fight.
-    if (state.isGM && summary.damage != null && ctx.kind !== "healing" && ctx.kind !== "hitdie") {
+    if (state.isGM && summary.damage != null && ctx.kind !== "healing" && ctx.kind !== "hitdie" && ctx.kind !== "temp") {
       offerDamageToFight({
         rollId: summary.rollId || `own-${Date.now()}`,
         amount: summary.damage,
