@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.18.1";
+  const APP_VERSION = "0.19.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -784,6 +784,15 @@ const App = (() => {
     $("open-party").classList.toggle("hidden", !state.isGM);
     $("open-bestiary").classList.toggle("hidden", !state.isGM);
     $("open-encounters").classList.toggle("hidden", !state.isGM);
+    $("gm-menu-btn").classList.toggle("hidden", !state.isGM);
+    if (!state.isGM) toggleGmMenu(false);
+  }
+
+  function toggleGmMenu(open) {
+    const menu = $("gm-menu");
+    const show = open ?? menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !show);
+    $("gm-menu-btn").setAttribute("aria-expanded", show ? "true" : "false");
   }
 
   function showImport() {
@@ -1256,44 +1265,32 @@ const App = (() => {
     const inQueue = Boolean(state.sheet && state.creatureId && (turnQueue?.items || []).some((i) => i.id === state.creatureId));
     bar.classList.toggle("hidden", !inQueue);
     bar.replaceChildren();
+    renderCombatCard();
     if (!inQueue) return;
     const mine = state.sheet.play.turn?.mine || null;
     const myTurn = isMyTurn();
     const { speed, why } = currentSpeed();
+    const moved = myTurn ? mine?.moved || 0 : 0;
+    const over = moved > speed;
 
+    // Movement: a bar, then the numbers and the corrections
+    if (myTurn) {
+      const meter = document.createElement("div");
+      meter.className = `turn-meter${over ? " is-over" : ""}`;
+      meter.innerHTML = `<i style="width:${speed ? Math.min(100, (moved / speed) * 100) : 100}%"></i>`;
+      bar.appendChild(meter);
+    }
+    const line = document.createElement("div");
+    line.className = "turn-line";
     const move = document.createElement("span");
-    move.className = "turn-move";
-    if (myTurn) {
-      const moved = mine?.moved || 0;
-      const over = moved > speed;
-      move.classList.toggle("is-over", over);
-      move.innerHTML = `Move <b>${moved}</b> / ${speed} ft` +
-        (why ? ` <span class="sub">${escapeHtml(why)}</span>` : "") +
-        (over ? ` <span class="sub">${moved - speed} over</span>` : "");
-    } else {
-      move.innerHTML = `Speed ${speed} ft${why ? ` <span class="sub">${escapeHtml(why)}</span>` : ""}`;
-    }
-    bar.appendChild(move);
+    move.innerHTML = myTurn
+      ? `Moved <b>${moved}</b> / ${speed} ft` + (over ? ` <span class="is-over">${moved - speed} over</span>` : "") +
+        (why ? ` · ${escapeHtml(why)}` : "")
+      : `Speed ${speed} ft${why ? ` · ${escapeHtml(why)}` : ""}`;
+    line.appendChild(move);
 
-    if (myTurn) {
-      const tweak = (label, title, fn) => {
-        const b = button(label, "btn-ghost", () => {
-          fn(ensureMine());
-          renderTurnBar();
-          savePlay();
-        });
-        b.classList.add("btn-small");
-        b.title = title;
-        bar.appendChild(b);
-      };
-      tweak("Dash", "Add your speed again for this turn", (m) => (m.dashes += 1));
-      tweak("−5", "Moved less than counted", (m) => (m.moved = Math.max(0, m.moved - 5)));
-      tweak("+5", "Moved more than counted (difficult terrain, standing up)", (m) => (m.moved += 5));
-      if ((mine?.moved || 0) || mine?.dashes) tweak("Reset", "Start this turn's movement over", (m) => { m.moved = 0; m.dashes = 0; });
-    }
-
-    const used = document.createElement("span");
-    used.className = "turn-used";
+    const chips = document.createElement("span");
+    chips.className = "turn-chips";
     // A reaction can be spent on anyone's turn; actions only on your own
     for (const [key, label] of [["action", "Action"], ["bonus", "Bonus"], ["reaction", "Reaction"]]) {
       if (key !== "reaction" && !myTurn) continue;
@@ -1311,9 +1308,48 @@ const App = (() => {
         renderTurnBar();
         savePlay();
       };
-      used.appendChild(chip);
+      chips.appendChild(chip);
     }
-    bar.appendChild(used);
+
+    if (myTurn) {
+      const links = document.createElement("span");
+      links.className = "turn-links";
+      const tweak = (label, title, fn) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "link-btn";
+        b.textContent = label;
+        b.title = title;
+        b.onclick = () => {
+          fn(ensureMine());
+          renderTurnBar();
+          savePlay();
+        };
+        links.appendChild(b);
+      };
+      tweak("Dash", "Add your speed again for this turn", (m) => (m.dashes += 1));
+      tweak("−5", "Moved less than counted", (m) => (m.moved = Math.max(0, m.moved - 5)));
+      tweak("+5", "Moved more than counted (difficult terrain, standing up)", (m) => (m.moved += 5));
+      if (moved || mine?.dashes) tweak("reset", "Start this turn's movement over", (m) => { m.moved = 0; m.dashes = 0; });
+      line.appendChild(links);
+      const row = document.createElement("div");
+      row.className = "turn-line";
+      row.appendChild(chips);
+      bar.append(line, row);
+    } else {
+      chips.style.marginLeft = "auto";
+      line.appendChild(chips);
+      bar.appendChild(line);
+    }
+  }
+
+  /** The combat card shows in initiative, or once a target is picked. */
+  function renderCombatCard() {
+    const inInit = Boolean(turnQueue?.items?.length);
+    const hasTarget = $("target-status").classList.contains("has-target");
+    const show = Boolean(state.sheet) && (inInit || hasTarget);
+    $("combat-card").classList.toggle("hidden", !show);
+    $("pick-target-pill").classList.toggle("hidden", show || !state.sheet);
   }
 
   // -------------------------------------------------------------------------
@@ -1479,7 +1515,13 @@ const App = (() => {
       if (info?.gone) {
         if (zoneShown === z && z.keep !== "Its marker has been removed from the board.") {
           z.keptId = null;
-          setKeepState(z.rulerId, "Its marker has been removed from the board.");
+          // A strip with stale names helps nobody: stop tracking and say why
+          if (z.min) {
+            closeZoneCard(z);
+            toast(`${z.spell?.name || "The zone"}'s marker was removed from the board.`);
+          } else {
+            setKeepState(z.rulerId, "Its marker has been removed from the board.");
+          }
         }
         return;
       }
@@ -1768,7 +1810,8 @@ const App = (() => {
     const bar = $("concentration");
     const conc = state.sheet?.play?.concentration;
     bar.classList.toggle("hidden", !conc);
-    if (conc) $("conc-label").textContent = `Concentrating on ${conc.name}`;
+    if (conc) $("conc-label").textContent = `Conc: ${conc.name}`;
+    $("concentration").title = conc ? `Concentrating on ${conc.name}. × drops it.` : "";
   }
 
   // -------------------------------------------------------------------------
@@ -2008,7 +2051,26 @@ const App = (() => {
     $("weapon-pick-cancel").onclick = () => panel.classList.add("hidden");
   }
 
+  /** Buffs as green pills in the header, so they're in view on every tab. */
+  function renderEffectPills() {
+    const box = $("effect-pills");
+    box.replaceChildren();
+    for (const fx of state.sheet?.play?.effects || []) {
+      const pill = document.createElement("span");
+      pill.className = `pill pill-buff${fx.active ? "" : " is-off"}`;
+      pill.textContent = fx.name;
+      pill.title = [
+        fx.weapon ? `${fx.weapon}` : `${signedBonus(fx.bonus)} to ${fx.targets.join(", ")}`,
+        fx.expires ? describeExpiry(fx) : null,
+        fx.fromName ? `from ${fx.fromName}` : null,
+        fx.active ? null : "suspended",
+      ].filter(Boolean).join(" · ");
+      box.appendChild(pill);
+    }
+  }
+
   function renderEffects() {
+    renderEffectPills();
     const presets = $("effect-presets");
     presets.replaceChildren();
     for (const preset of EFFECT_PRESETS) {
@@ -2071,6 +2133,8 @@ const App = (() => {
       remove.textContent = "×";
       remove.title = fx.fromId ? "Remove" : "Remove (and withdraw from anyone holding it)";
       remove.onclick = () => dismissEffect(fx);
+      remove.textContent = "End";
+      remove.className = "btn btn-small btn-gold is-fill";
 
       row.append(remove);
       list.appendChild(row);
@@ -2090,8 +2154,16 @@ const App = (() => {
     const play = s.play;
     const max = effectiveMaxHp(s);
     const mods = play.maxHpMods || [];
-    const temp = play.hp.temp ? ` +${play.hp.temp}` : "";
-    $("v-hp").textContent = `${play.hp.current}/${max}${mods.length ? "*" : ""}${temp}`;
+    $("v-hp").textContent = `${play.hp.current}/${max}${mods.length ? "*" : ""}`;
+    $("v-temp").textContent = play.hp.temp ? `+${play.hp.temp} temp` : "";
+    // Temp HP shows as a blue segment after the green, scaled to the maximum
+    const whole = Math.max(max, play.hp.current + play.hp.temp);
+    const ratio = max ? play.hp.current / max : 0;
+    $("hp-fill").style.width = `${(play.hp.current / whole) * 100}%`;
+    $("hp-temp-fill").style.width = `${(play.hp.temp / whole) * 100}%`;
+    const meter = $("hp-fill").parentElement;
+    meter.classList.toggle("is-bloodied", ratio <= 0.5 && ratio > 0.25);
+    meter.classList.toggle("is-critical", ratio <= 0.25);
     $("v-hp").title = [
       play.hp.temp ? `${play.hp.current} HP plus ${play.hp.temp} temporary` : "",
       mods.length
@@ -2388,6 +2460,15 @@ const App = (() => {
     toast(`Temp HP set to ${amount}.`);
   }
 
+  /** "=20": set current HP outright, leaving temp HP alone. */
+  function setHp(n) {
+    const play = state.sheet.play;
+    play.hp.current = Math.max(0, Math.min(effectiveMaxHp(state.sheet), n));
+    renderHp(state.sheet);
+    savePlay();
+    reportVitals();
+  }
+
   /** Damage eats temporary hit points first, then real ones. */
   function applyHp(delta) {
     const play = state.sheet.play;
@@ -2415,7 +2496,9 @@ const App = (() => {
 
       const chip = document.createElement("div");
       chip.className = "hd-chip";
-      chip.innerHTML = `<span>Hit dice ${hd.die}</span><span class="hd-count">${left}/${hd.total}</span>`;
+      chip.innerHTML = `<span>${hd.die}</span>`;
+      chip.appendChild(pips(left, hd.total));
+      chip.insertAdjacentHTML("beforeend", `<span class="hd-count">${left}/${hd.total}</span>`);
 
       const spend = document.createElement("button");
       spend.className = "btn btn-small";
@@ -2694,8 +2777,11 @@ const App = (() => {
     // Keep the picker to conditions not already applied.
     const pick = $("condition-pick");
     const current = new Set(play.conditions.map((c) => c.name));
-    const chosen = pick.value;
     pick.replaceChildren();
+    const label = document.createElement("option");
+    label.value = "";
+    label.textContent = "+ Condition";
+    pick.appendChild(label);
     for (const name of CONDITION_NAMES) {
       if (current.has(name)) continue;
       const opt = document.createElement("option");
@@ -2703,7 +2789,7 @@ const App = (() => {
       opt.textContent = name;
       pick.appendChild(opt);
     }
-    if ([...pick.options].some((o) => o.value === chosen)) pick.value = chosen;
+    pick.value = "";
     $("condition-add").disabled = pick.options.length === 0;
 
     renderConditionEffects();
@@ -2825,6 +2911,7 @@ const App = (() => {
     if (!queue || !queue.items?.length) {
       el.textContent = "Not in initiative";
       el.classList.remove("is-turn");
+      renderCombatCard();
       return;
     }
 
@@ -2833,15 +2920,16 @@ const App = (() => {
       ? queue.items.findIndex((i) => i.id === state.creatureId)
       : -1;
 
-    const round = turnSeen?.round ? `Round ${turnSeen.round} · ` : "";
+    const round = turnSeen?.round ? `<b>Round ${turnSeen.round}</b> ` : "";
     if (mine >= 0 && mine === queue.activeItemIndex) {
-      el.textContent = `${round}Your turn`;
+      el.innerHTML = `${round}<span class="badge">your turn</span>`;
       el.classList.add("is-turn");
     } else {
       el.classList.remove("is-turn");
-      const position = mine >= 0 ? ` · you are ${mine + 1}/${queue.items.length}` : "";
-      el.textContent = `${round}Turn: ${active?.name || "—"}${position}`;
+      const position = mine >= 0 ? ` · you're ${mine + 1}/${queue.items.length}` : "";
+      el.innerHTML = `${round}<span class="status">${escapeHtml(active?.name || "—")}'s turn${position}</span>`;
     }
+    renderCombatCard();
   }
 
   function renderBindBar() {
@@ -2849,20 +2937,20 @@ const App = (() => {
     const btn = $("bind-btn");
 
     if (state.creatureId) {
-      status.textContent = "Linked to a mini — rolls post as this character";
+      status.textContent = "linked";
+      status.title = "Linked to a mini: rolls post as this character";
       status.classList.add("is-bound");
-      btn.textContent = "Unlink";
+      btn.textContent = "unlink";
       btn.onclick = async () => {
         await Store.unbind(state.creatureId);
         state.creatureId = null;
         renderBindBar();
       };
     } else {
-      status.textContent = state.selection.length
-        ? "A mini is selected — link it to this sheet"
-        : "No mini linked";
+      status.textContent = state.selection.length ? "A mini is selected" : "No mini linked";
+      status.title = "";
       status.classList.remove("is-bound");
-      btn.textContent = "Link selected mini";
+      btn.textContent = state.selection.length ? "link it" : "link selected mini";
       btn.onclick = bindSelected;
     }
   }
@@ -2883,99 +2971,194 @@ const App = (() => {
 
   // --- actions -------------------------------------------------------------
 
+  /** A crit doubles the dice, not the modifier: 1d8+3 becomes 2d8+3. */
+  const critOf = (roll) => String(roll || "").replace(/(\d*)d(\d+)/g, (_, n, d) => `${(parseInt(n || "1", 10)) * 2}d${d}`);
+
+  function sectionTitle(text, extra) {
+    const h = document.createElement("h2");
+    h.className = "sec-title";
+    h.textContent = text;
+    if (extra) h.appendChild(extra);
+    return h;
+  }
+
   function renderAttacks(s) {
     const box = $("attacks");
     box.replaceChildren();
+    box.appendChild(sectionTitle("Attacks"));
 
     if (!s.attacks.length) {
-      box.innerHTML = '<p class="hint">No weapons on this sheet.</p>';
+      box.insertAdjacentHTML("beforeend", '<p class="hint">No weapons on this sheet.</p>');
       return;
     }
 
     for (const raw of s.attacks) {
       const a = applyWeaponEffects(raw);
-      const sub = [
-        a.kind,
-        a.damageType,
-        a.modifiedBy.length ? a.modifiedBy.join(", ") : null,
+      const card = document.createElement("div");
+      card.className = "card attack-card";
+      const notes = [
         a.equipped ? null : "not equipped",
         a.proficient ? null : "not proficient",
-      ]
-        .filter(Boolean)
-        .join(" · ");
+      ].filter(Boolean);
+      // "5/5 ft." is how D&D Beyond writes plain melee reach
+      const where = String(a.range || (a.kind === "melee" ? `${(a.properties || []).includes("Reach") ? 10 : 5} ft` : ""))
+        .replace(/^(\d+)\/\1 ft\.?$/, "$1 ft").replace(/ ft\.$/, " ft");
+      card.innerHTML =
+        `<div class="attack-top"><b>${escapeHtml(a.name)}</b>` +
+        (a.modifiedBy.length ? `<span class="tag" title="${escapeHtml(a.modifiedBy.join(", "))}">✦ ${escapeHtml(a.modifiedBy[0])}</span>` : "") +
+        `<span class="attack-sub">${escapeHtml([a.damageType ? a.damageType.toLowerCase() : null, where].filter(Boolean).join(" · "))}</span></div>` +
+        (notes.length ? `<div class="attack-note">${escapeHtml(notes.join(" · "))}</div>` : "");
 
-      box.appendChild(
-        rollRow({
-          name: a.modifiedBy.length ? `${a.name} ✦` : a.name,
-          sub,
-          value: DDB.signed(a.toHit),
-          tag: a.damageRoll, // parked until the DM calls the hit
-          // Attack only. Damage waits for the DM to call the hit — see renderPending.
-          onRoll: (mode) =>
-            doRoll({ name: a.name, roll: a.attackRoll, mode, kind: "attack", damage: null, parkedDamage: a.damageRoll }),
-        })
-      );
+      const tiles = document.createElement("div");
+      tiles.className = "attack-tiles";
+      // To hit rolls the attack. Damage waits for the hit to be called (see
+      // renderPending), so its tiles are for reading, not clicking.
+      const hit = document.createElement("button");
+      hit.className = "roll-tile is-roll";
+      hit.title = `Roll ${a.name} to hit. Shift-click for advantage, Ctrl-click for disadvantage.`;
+      hit.innerHTML = `<span>To hit</span><b>${escapeHtml(DDB.signed(a.toHit))}</b>`;
+      hit.onclick = (ev) =>
+        doRoll({ name: a.name, roll: a.attackRoll, mode: modeFromEvent(ev), kind: "attack", damage: null, parkedDamage: a.damageRoll });
+      const dmg = document.createElement("div");
+      dmg.className = "roll-tile";
+      dmg.title = "Rolled once the hit is called";
+      dmg.innerHTML = `<span>Damage</span><b>${escapeHtml(a.damageRoll || "—")}</b>`;
+      const crit = document.createElement("div");
+      crit.className = "roll-tile is-crit";
+      crit.title = "On a critical hit the dice double";
+      crit.innerHTML = `<span>Crit</span><b>${escapeHtml(critOf(a.damageRoll) || "—")}</b>`;
+      tiles.append(hit, dmg, crit);
+      card.appendChild(tiles);
+      box.appendChild(card);
     }
   }
 
   function renderResources(s) {
     const box = $("resources");
     box.replaceChildren();
+    if (!s.resources.length && !s.choiceActions?.length) return;
 
-    if (s.resources.length) {
-      const h = document.createElement("h2");
-      h.textContent = "Limited use";
-      box.appendChild(h);
-      for (const r of s.resources) box.appendChild(resourceRow(s, r));
-    }
-
-    // Choices that cost nothing to pick, so they get no counter — just the menu.
-    if (s.choiceActions?.length) {
-      const h = document.createElement("h2");
-      h.textContent = "Options";
-      box.appendChild(h);
-      for (const a of s.choiceActions) box.appendChild(optionRow(a, null));
-    }
+    box.appendChild(sectionTitle("Class features"));
+    const card = document.createElement("div");
+    card.className = "card feature-card";
+    for (const r of s.resources) card.appendChild(resourceRow(s, r));
+    // Choices that cost nothing to pick, so they get no counter, just the menu
+    for (const a of s.choiceActions || []) card.appendChild(featureRow(a, null));
+    box.appendChild(card);
   }
 
-  /**
-   * A resource with choices: pick which effect you're spending it on, so the chat
-   * line says "uses Channel Divinity: Divine Spark" and the right dice get rolled.
-   */
+  // Which feature rows are open, by name, so a re-render keeps them open
+  const openFeatures = new Set();
+
+  /** Pips for uses left, drawn rather than typed: ●●○ reads at a glance. */
+  function pips(left, max) {
+    const el = document.createElement("span");
+    el.className = "pips";
+    el.setAttribute("aria-label", `${left} of ${max} left`);
+    if (max > 8) {
+      el.textContent = "";
+      return el;
+    }
+    for (let i = 0; i < max; i += 1) {
+      const dot = document.createElement("i");
+      if (i >= left) dot.className = "is-used";
+      el.appendChild(dot);
+    }
+    return el;
+  }
+
+  /** A limited-use feature: name, pips, Use. Its options and text open on tap. */
   function resourceRow(s, r) {
     const used = s.play.resourcesUsed[r.name] || 0;
     const left = r.max - used;
-
-    const wrap = document.createElement("div");
-    wrap.className = "resource";
-
-    const row = document.createElement("div");
-    row.className = "resource-head";
-    row.innerHTML =
-      `<span class="rr-name">${escapeHtml(r.name)}<br><span class="rr-sub">resets on ${escapeHtml(r.resetsOn)}</span></span>` +
-      `<span class="rr-value">${left}/${r.max}</span>`;
+    const spend = () => {
+      s.play.resourcesUsed[r.name] = used + 1;
+      renderResources(s);
+      savePlay();
+    };
+    const row = featureRow(r, spend, left);
+    const head = row.querySelector(".feature-head");
+    const count = document.createElement("span");
+    count.className = "feature-count";
+    count.textContent = `${left}/${r.max}`;
+    count.title = `Back on a ${r.resetsOn}`;
+    head.insertBefore(count, head.querySelector(".feature-use"));
+    head.insertBefore(pips(left, r.max), count);
 
     const undo = document.createElement("button");
-    undo.className = "btn btn-small btn-ghost";
-    undo.textContent = "↺";
-    undo.title = "Give one back";
+    undo.className = "link-btn";
+    undo.textContent = "give one back";
     undo.disabled = used <= 0;
     undo.onclick = () => {
       s.play.resourcesUsed[r.name] = Math.max(0, used - 1);
       renderResources(s);
       savePlay();
     };
-    row.appendChild(undo);
-    wrap.appendChild(row);
-
-    wrap.appendChild(optionRow(r, () => {
-      s.play.resourcesUsed[r.name] = used + 1;
-      renderResources(s);
-      savePlay();
-    }, left));
-
-    return wrap;
+    const foot = row.querySelector(".feature-foot");
+    foot.insertAdjacentHTML("afterbegin", `<span class="hint">Back on a ${escapeHtml(r.resetsOn)}.</span>`);
+    foot.appendChild(undo);
+    return row;
   }
+
+  /**
+   * One feature row. With options (Channel Divinity), Use opens the row so
+   * you pick which one; without, it's spent straight away.
+   */
+  function featureRow(owner, spend, left = Infinity) {
+    const row = document.createElement("div");
+    row.className = "feature";
+    const open = openFeatures.has(owner.name);
+    row.classList.toggle("is-open", open);
+    const options = owner.options || [];
+
+    const head = document.createElement("div");
+    head.className = "feature-head";
+    const name = document.createElement("button");
+    name.className = "feature-name";
+    name.setAttribute("aria-expanded", open ? "true" : "false");
+    name.innerHTML = `<b>${escapeHtml(owner.name)}</b>` +
+      `<small>${escapeHtml(options.length ? options.map((o) => o.name).join(" · ") : firstSentence(owner.description))}</small>`;
+    const toggle = () => {
+      if (openFeatures.has(owner.name)) openFeatures.delete(owner.name);
+      else openFeatures.add(owner.name);
+      renderResources(state.sheet);
+    };
+    name.onclick = toggle;
+    head.appendChild(name);
+
+    const use = document.createElement("button");
+    use.className = "btn btn-small btn-gold feature-use";
+    use.textContent = spend ? "Use" : "Announce";
+    use.disabled = spend ? left <= 0 : false;
+    head.appendChild(use);
+    row.appendChild(head);
+
+    // The option picker and description; its own button is driven from the head
+    const body = optionRow(owner, spend, left);
+    body.classList.add("feature-body");
+    const bodyUse = body.querySelector(":scope > button");
+    bodyUse?.classList.add("hidden");
+    use.onclick = () => {
+      // With options (Channel Divinity), the first press opens the row to pick one
+      if (options.length && !openFeatures.has(owner.name)) return toggle();
+      bodyUse?.click();
+    };
+    row.appendChild(body);
+    const foot = document.createElement("div");
+    foot.className = "feature-foot";
+    row.appendChild(foot);
+    if (!open) {
+      body.classList.add("hidden");
+      foot.classList.add("hidden");
+    }
+    return row;
+  }
+
+  const firstSentence = (text) => {
+    const t = String(text || "").replace(/\s+/g, " ").trim();
+    const m = /^(.{0,90}?[.!?])(\s|$)/.exec(t);
+    return m ? m[1] : t.length > 90 ? `${t.slice(0, 88)}…` : t;
+  };
 
   /**
    * The choice menu shared by limited-use resources and free options.
@@ -3093,22 +3276,27 @@ const App = (() => {
 
     if ((s.spellcasting?.granted || []).length && !state.granted) fillGrantedSpells(s);
 
+    const many = s.spellcasting.blocks.length > 1;
     for (const block of s.spellcasting.blocks) {
-      const head = document.createElement("h2");
-      head.textContent = block.ability
-        ? `${block.className} — DC ${block.saveDc}, attack ${DDB.signed(block.attackBonus)}`
-        : block.className;
-      box.appendChild(head);
+      // One caster: the class is implied and the DC sits with the slots. Several:
+      // each block says whose it is and its own numbers.
+      if (many || !block.ability) {
+        const head = sectionTitle(block.ability
+          ? `${block.className} · DC ${block.saveDc} · ${DDB.signed(block.attackBonus)}`
+          : block.className);
+        head.classList.add("spell-block");
+        box.appendChild(head);
+      }
 
       const byLevel = {};
       for (const sp of block.spells) (byLevel[sp.level] ||= []).push(sp);
 
       for (const lvl of Object.keys(byLevel).sort((a, b) => a - b)) {
-        const label = document.createElement("div");
-        label.className = "spell-level";
-        label.textContent = lvl === "0" ? "Cantrips" : `Level ${lvl}`;
-        box.appendChild(label);
-        for (const sp of byLevel[lvl]) box.appendChild(spellCard(sp, block));
+        box.appendChild(sectionTitle(lvl === "0" ? "Cantrips" : `Level ${lvl}`));
+        const list = document.createElement("div");
+        list.className = "card spell-list";
+        for (const sp of byLevel[lvl]) list.appendChild(spellCard(sp, block));
+        box.appendChild(list);
       }
     }
 
@@ -3136,26 +3324,24 @@ const App = (() => {
       const block =
         s.spellcasting.blocks.find((b) => b.className === entries[0].className) || s.spellcasting.blocks[0];
 
-      const head = document.createElement("h2");
-      head.textContent = `${source} — always prepared`;
-      box.appendChild(head);
-
-      const note = document.createElement("p");
-      note.className = "hint";
-      note.textContent =
+      const head = sectionTitle(`${source} · always prepared`);
+      head.title =
         "D&D Beyond names these in your subclass but doesn't include them in its export, " +
         "so the details come from the bundled 2024 SRD.";
-      box.appendChild(note);
+      box.appendChild(head);
+      const list = document.createElement("div");
+      list.className = "card spell-list";
+      box.appendChild(list);
 
       for (const g of entries.sort((a, b) => (a.spell?.level ?? 9) - (b.spell?.level ?? 9))) {
         if (!g.spell) {
           const miss = document.createElement("div");
           miss.className = "hint dimmed";
-          miss.textContent = `${titleCase(g.name)} — granted at level ${g.atLevel}, not in the bundled SRD.`;
-          box.appendChild(miss);
+          miss.textContent = `${titleCase(g.name)}: granted at level ${g.atLevel}, not in the bundled SRD.`;
+          list.appendChild(miss);
           continue;
         }
-        box.appendChild(spellCard(g.spell, block));
+        list.appendChild(spellCard(g.spell, block));
       }
     }
   }
@@ -3167,6 +3353,13 @@ const App = (() => {
   function renderSlots(s) {
     const box = $("slots");
     box.replaceChildren();
+    const caster = s.spellcasting.blocks.find((b) => b.ability);
+    if (caster && s.spellcasting.blocks.filter((b) => b.ability).length === 1) {
+      const dc = document.createElement("span");
+      dc.className = "slot-dc";
+      dc.innerHTML = `Save DC <b>${caster.saveDc}</b> · Attack <b>${escapeHtml(DDB.signed(caster.attackBonus))}</b>`;
+      box.appendChild(dc);
+    }
 
     for (const slot of s.spellcasting.slots) {
       if (!slot.available) continue;
@@ -3215,8 +3408,10 @@ const App = (() => {
     const left = available - used;
     const chip = document.createElement("button");
     chip.className = `slot${left === 0 ? " is-empty" : ""}`;
-    chip.title = "Click to spend, right-click to give one back";
-    chip.innerHTML = `${label} <span class="slot-count">${left}/${available}</span>`;
+    chip.title = `${left} of ${available} left. Click to spend one, right-click to give one back.`;
+    chip.innerHTML = `<span class="slot-label">${escapeHtml(label)}</span>`;
+    chip.appendChild(pips(left, available));
+    if (available > 8) chip.insertAdjacentHTML("beforeend", `<span class="slot-count">${left}/${available}</span>`);
 
     chip.onclick = () => {
       if (used >= available) return;
@@ -3276,31 +3471,81 @@ const App = (() => {
     return out;
   }
 
+  /** What a spell does in a few words, for its row: "conc. · WIS DC 13 · 20 ft cube · 1d8". */
+  function spellSummary(sp, block) {
+    const area = Zones.areaOf(sp);
+    const dice = sp.damage?.[0]?.roll || sp.healing;
+    return [
+      sp.concentration ? "conc." : null,
+      /bonus/i.test(sp.castingTime || "") ? "bonus action" : /reaction/i.test(sp.castingTime || "") ? "reaction" : null,
+      sp.requiresSavingThrow && block?.saveDc ? `${String(sp.saveAbility || "").slice(0, 3).toUpperCase()} DC ${block.saveDc}`.trim() : null,
+      sp.requiresAttackRoll && block?.attackBonus != null ? `${DDB.signed(block.attackBonus)} to hit` : null,
+      area ? Zones.describeArea(area) : null,
+      dice ? (sp.healing && !sp.damage?.length ? `${dice} healing` : dice) : null,
+      sp.limitedUse ? "free use" : null,
+    ].filter(Boolean).join(" · ");
+  }
+
+  // Which spells are open, so casting (which re-renders) keeps the roll buttons in view
+  const openSpells = new Set();
+
   function spellCard(sp, block) {
     const card = document.createElement("div");
     card.className = "spell";
 
-    const head = document.createElement("button");
+    const head = document.createElement("div");
     head.className = "spell-head";
-    const dice = sp.damage?.[0]?.roll || sp.healing;
-    head.innerHTML =
-      `<span class="sp-name">${sp.prepared ? '<span class="prepared-dot">●</span> ' : ""}${escapeHtml(sp.name)}</span>` +
-      (dice ? `<span class="sp-tag">${escapeHtml(dice)}</span>` : "") +
-      (sp.upcast ? '<span class="sp-tag">scales</span>' : "") +
-      (sp.limitedUse ? '<span class="sp-tag">free use</span>' : "") +
-      (sp.concentration ? '<span class="sp-tag">conc.</span>' : "");
+    const name = document.createElement("button");
+    name.className = "spell-name";
+    name.innerHTML =
+      `<span class="caret" aria-hidden="true">▸</span>` +
+      `<span><b>${sp.prepared ? '<span class="prepared-dot" title="Prepared">●</span> ' : ""}${escapeHtml(sp.name)}</b>` +
+      `<small>${escapeHtml(spellSummary(sp, block))}</small></span>`;
+    head.appendChild(name);
+
+    // Cast right from the row: the cheapest way to pay for it, which the open
+    // card lets you change (upcasting, pact slot, free use)
+    const options = castableLevels(state.sheet, sp);
+    const first = options.find((o) => o.kind === "free" && o.left > 0) || options.find((o) => o.left > 0);
+    const cast = document.createElement("button");
+    cast.className = "btn btn-small btn-gold";
+    cast.textContent = "Cast";
+    if (sp.level === 0 || !options.length) {
+      cast.title = "Say you cast it; the open card has the rolls";
+      cast.onclick = async () => {
+        await announce(`casts ${Rolls.bold(sp.name)}`);
+        open(true);
+      };
+    } else {
+      cast.disabled = !first;
+      cast.title = first
+        ? first.kind === "free" ? "Uses a free use" : first.kind === "pact" ? "Uses a pact slot" : `Uses a level ${first.level} slot`
+        : "Nothing left to cast it with";
+      cast.onclick = async () => {
+        await castSpell(sp, first.level, first.kind);
+        openSpells.add(sp.name);
+        renderSpells(state.sheet); // slot counts and the next cheapest slot changed
+      };
+    }
+    head.appendChild(cast);
 
     const body = document.createElement("div");
     body.className = "spell-body hidden";
 
-    head.onclick = () => {
+    function open(show) {
       // Rebuild on open so slot counts and upcast dice are always current.
       body.replaceChildren();
-      buildSpellBody(body, sp, block);
-      body.classList.toggle("hidden");
-    };
+      if (show) buildSpellBody(body, sp, block);
+      body.classList.toggle("hidden", !show);
+      card.classList.toggle("is-open", show);
+      name.querySelector(".caret").textContent = show ? "▾" : "▸";
+      if (show) openSpells.add(sp.name);
+      else openSpells.delete(sp.name);
+    }
+    name.onclick = () => open(body.classList.contains("hidden"));
 
     card.append(head, body);
+    if (openSpells.has(sp.name)) open(true);
     return card;
   }
 
@@ -3384,7 +3629,7 @@ const App = (() => {
       if (sp.requiresAttackRoll && block.attackBonus != null) {
         const dmgHint = rolls.damage ? ` · ${rolls.damage}` : "";
         actions.appendChild(
-          button(`Attack ${DDB.signed(block.attackBonus)}${dmgHint}`, "btn-primary", (mode) =>
+          button(`Attack ${DDB.signed(block.attackBonus)}${dmgHint}`, "btn-gold is-fill", (mode) =>
             doRoll({
               name: sp.name,
               roll: `d20${DDB.signed(block.attackBonus)}`,
@@ -3435,7 +3680,7 @@ const App = (() => {
         const cast = button(
           opt?.kind === "free" ? `Cast (free use)` :
           opt?.kind === "pact" ? `Cast (pact slot)` : `Cast (uses L${chosen} slot)`,
-          "btn-ghost",
+          "btn-gold",
           async () => {
             await castSpell(sp, chosen, chosenKind);
             refresh();
@@ -3447,7 +3692,7 @@ const App = (() => {
 
       const area = Zones.areaOf(sp);
       if (area) {
-        const z = button(`Zone ${Zones.describeArea(area)}`, "btn-ghost", () => Zones.cast(sp));
+        const z = button(`◇ Zone ${Zones.describeArea(area)}`, "btn-ghost", () => Zones.cast(sp));
         z.title = "Place TaleSpire's ruler for this spell's area and see who's inside";
         actions.appendChild(z);
       }
@@ -3638,33 +3883,36 @@ const App = (() => {
     // a marker and the wording goes in one footnote below.
     const caveats = [...new Set(s.savingThrows.flatMap((sv) => sv.conditionalAdvantage))];
 
+    const short = (name) => String(name || "").slice(0, 3).toUpperCase();
     for (const sv of s.savingThrows) {
-      const row = rollRow({
-        name: sv.name,
-        sub: "",
+      const tile = rollTile({
+        label: short(sv.name),
         value: DDB.signed(sv.value),
-        tag: [sv.proficient ? "●" : "", sv.conditionalAdvantage.length ? "adv*" : ""].filter(Boolean).join(" "),
+        prof: sv.proficient,
+        mark: sv.conditionalAdvantage.length ? "adv*" : "",
+        title: `${sv.name} save${sv.proficient ? " (proficient)" : ""}` +
+          (sv.conditionalAdvantage.length ? `\nAdvantage ${sv.conditionalAdvantage.join("; ")}` : ""),
         onRoll: (mode) =>
           doRoll({ name: `${sv.name} save`, roll: `d20${DDB.signed(sv.value)}`, mode, kind: "save" }),
       });
-      if (sv.conditionalAdvantage.length) row.title = `Advantage ${sv.conditionalAdvantage.join("; ")}`;
-      saves.appendChild(row);
+      saves.appendChild(tile);
     }
 
     const note = $("saves-note");
     note.replaceChildren();
     if (caveats.length) {
-      note.textContent = `adv* — advantage ${caveats.join("; ")}`;
+      note.textContent = `adv*: advantage ${caveats.join("; ")}`;
     }
 
     const abilities = $("abilities");
     abilities.replaceChildren();
-    for (const [key, ab] of Object.entries(s.abilities)) {
+    for (const [, ab] of Object.entries(s.abilities)) {
       abilities.appendChild(
-        rollRow({
-          name: ab.name,
-          sub: `score ${ab.score}`,
+        rollTile({
+          label: short(ab.name),
           value: DDB.signed(ab.mod),
+          score: ab.score,
+          title: `${ab.name} check`,
           onRoll: (mode) =>
             doRoll({ name: `${ab.name} check`, roll: `d20${DDB.signed(ab.mod)}`, mode, kind: "check" }),
         })
@@ -3674,16 +3922,30 @@ const App = (() => {
     const skills = $("skills");
     skills.replaceChildren();
     for (const sk of s.skills) {
-      skills.appendChild(
-        rollRow({
-          name: sk.name,
-          sub: sk.ability.toUpperCase(),
-          value: DDB.signed(sk.value),
-          tag: sk.expertise ? "◆" : sk.proficient ? "●" : "",
-          onRoll: (mode) => doRoll({ name: sk.name, roll: `d20${DDB.signed(sk.value)}`, mode, kind: "check" }),
-        })
-      );
+      const row = document.createElement("button");
+      row.className = "skill-row";
+      const level = sk.expertise ? "expertise" : sk.proficient ? "proficient" : "";
+      row.title = `Roll ${sk.name}${level ? ` (${level})` : ""}`;
+      row.innerHTML =
+        `<i class="skill-dot${sk.expertise ? " is-expert" : sk.proficient ? " is-prof" : ""}" aria-hidden="true"></i>` +
+        `<span class="skill-name">${escapeHtml(sk.name)} <small>${escapeHtml(sk.ability.toUpperCase())}</small></span>` +
+        `<b>${escapeHtml(DDB.signed(sk.value))}</b>`;
+      row.onclick = (ev) => doRoll({ name: sk.name, roll: `d20${DDB.signed(sk.value)}`, mode: modeFromEvent(ev), kind: "check" });
+      skills.appendChild(row);
     }
+  }
+
+  /** A tile that rolls: label on top, the modifier in gold, the score under it. */
+  function rollTile({ label, value, score, prof, mark, title, onRoll }) {
+    const tile = document.createElement("button");
+    tile.className = `ability-tile${prof ? " is-prof" : ""}`;
+    tile.title = `${title}. Shift-click for advantage, Ctrl-click for disadvantage.`;
+    tile.innerHTML =
+      `<span class="ability-label">${escapeHtml(label)}${prof ? ' <i aria-label="proficient">●</i>' : ""}${mark ? ` <em>${escapeHtml(mark)}</em>` : ""}</span>` +
+      `<b>${escapeHtml(String(value))}</b>` +
+      (score != null ? `<small>${escapeHtml(String(score))}</small>` : "");
+    tile.onclick = (ev) => onRoll(modeFromEvent(ev));
+    return tile;
   }
 
   function renderInfo(s) {
@@ -4006,6 +4268,9 @@ const App = (() => {
     status.textContent = text;
     status.classList.toggle("has-target", Boolean(hasTarget));
     $("clear-target").classList.toggle("hidden", !hasTarget);
+    $("pick-target").textContent = hasTarget ? "→" : "Pick target";
+    status.classList.toggle("hidden", !hasTarget);
+    renderCombatCard();
   }
 
   async function pickTarget() {
@@ -4220,22 +4485,55 @@ const App = (() => {
     $("rest-short").onclick = shortRest;
     $("rest-long").onclick = longRest;
 
-    const amount = () => Math.max(0, parseInt($("hp-amount").value, 10) || 0);
-    $("hp-damage").onclick = () => applyHp(-amount());
-    $("hp-heal").onclick = () => applyHp(amount());
+    // The HP box: -7 damage, +5 healing, =20 set; a bare 7 is damage, as at the table
+    const hpBox = $("hp-input");
+    hpBox.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      const m = /^\s*([-+=−]?)\s*(\d+)\s*$/.exec(hpBox.value);
+      if (!m) return toast("Type -7 for damage, +5 for healing, or =20 to set.", true);
+      const n = parseInt(m[2], 10);
+      if (m[1] === "+") applyHp(n);
+      else if (m[1] === "=") setHp(n);
+      else applyHp(-n);
+      hpBox.value = "";
+    });
+    $("hp-temp-btn").onclick = () => {
+      const n = Math.abs(parseInt(hpBox.value.replace(/[^0-9]/g, ""), 10) || 0);
+      if (!n) return toast("Type how much temp HP, then press Temp.", true);
+      grantTempHp(n);
+      hpBox.value = "";
+    };
+    $("hp-more").onclick = () => {
+      const drawer = $("hp-drawer");
+      const open = drawer.classList.toggle("hidden") === false;
+      $("hp-more").setAttribute("aria-expanded", open ? "true" : "false");
+      $("hp-more").textContent = open ? "less" : "more";
+    };
+    $("gm-menu-btn").onclick = () => toggleGmMenu();
+    for (const id of ["open-party", "open-bestiary", "open-encounters"]) {
+      $(id).addEventListener("click", () => toggleGmMenu(false));
+    }
+    $("pick-target-pill").onclick = pickTarget;
     $("maxhp-add").onclick = () => {
       const n = parseInt($("maxhp-amount").value, 10);
       if (!Number.isFinite(n) || !n) return toast("Enter how much the maximum changes, e.g. 5 or -7.", true);
       addMaxHpMod(n, $("maxhp-name").value);
       $("maxhp-name").value = "";
     };
-    $("hp-temp-add").onclick = () =>
-      grantTempHp(Math.max(0, parseInt($("hp-temp-amount").value, 10) || 0));
 
     $("effect-custom-toggle").onclick = () => $("effect-custom").classList.toggle("hidden");
+    $("effect-add-toggle").onclick = () => {
+      const open = $("effect-add").classList.toggle("hidden") === false;
+      $("effect-add-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+      $("effect-add-toggle").textContent = open ? "Done" : "+ Add";
+    };
     $("conc-drop").onclick = () => endConcentration();
     $("condition-add").onclick = () => addCondition($("condition-pick").value);
-    $("condition-pick").onchange = renderConditionPreview;
+    // Picking a condition adds it; the first option is the "+ Condition" label
+    $("condition-pick").onchange = () => {
+      const name = $("condition-pick").value;
+      if (name) addCondition(name);
+    };
     watchModifierKeys();
 
     // Staged rolls that are never thrown would otherwise be remembered forever.

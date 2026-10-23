@@ -70,82 +70,91 @@
     <div class="who">
       <h1 id="char-name">—</h1>
       <p id="char-meta">—</p>
+      <!-- Which mini this sheet speaks for; the button links or unlinks -->
+      <div id="bind-bar" class="bind-bar">
+        <span id="bind-status">No mini linked</span>
+        <button id="bind-btn" class="link-btn">Link selected mini</button>
+      </div>
     </div>
-    <button id="open-party" class="btn btn-ghost hidden" title="GM: party overview">Party</button>
-    <button id="open-bestiary" class="btn btn-ghost hidden" title="GM: monsters">Monsters</button>
-    <button id="open-encounters" class="btn btn-ghost hidden" title="GM: encounters and initiative">Fights</button>
-    <button id="open-library" class="btn btn-ghost" title="Switch or import a character">☰</button>
+    <button id="gm-menu-btn" class="icon-btn hidden" aria-haspopup="true" aria-expanded="false" title="GM tools">GM</button>
+    <button id="open-library" class="icon-btn" title="Switch or import a character">☰</button>
+    <div id="gm-menu" class="gm-menu hidden" role="menu">
+      <button id="open-party" class="btn btn-ghost hidden" role="menuitem" title="GM: party overview">Party</button>
+      <button id="open-bestiary" class="btn btn-ghost hidden" role="menuitem" title="GM: monsters">Monsters</button>
+      <button id="open-encounters" class="btn btn-ghost hidden" role="menuitem" title="GM: encounters and initiative">Fights</button>
+    </div>
   </header>
 
-  <div id="bind-bar" class="bind-bar">
-    <span id="bind-status">No mini linked</span>
-    <button id="bind-btn" class="btn btn-small">Link selected mini</button>
-  </div>
-
-  <div class="vitals">
-    <div class="vital"><span class="vital-label">AC</span><span id="v-ac" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">HP</span><span id="v-hp" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Init</span><span id="v-init" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Speed</span><span id="v-speed" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Pass. Per</span><span id="v-pp" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Prof</span><span id="v-prof" class="vital-value">—</span></div>
-  </div>
-
-  <div class="hp-bar">
-    <input id="hp-amount" type="number" min="0" value="1" aria-label="Amount of damage or healing">
-    <button id="hp-damage" class="btn btn-small">Damage</button>
-    <button id="hp-heal" class="btn btn-small">Heal</button>
-    <input id="hp-temp-amount" type="number" min="0" value="0" aria-label="Temporary hit points to grant">
-    <button id="hp-temp-add" class="btn btn-small">Temp HP</button>
-  </div>
-
-  <!-- Changes to maximum HP (Aid, a wraith's Life Drain). Not temp HP: these
-       move the maximum itself, and all of them end on a long rest. -->
-  <div class="hp-bar maxhp-row">
-    <input id="maxhp-amount" type="number" value="5" aria-label="Change to maximum hit points, negative to lower it">
-    <input id="maxhp-name" class="maxhp-name" type="text" placeholder="Aid, Life Drain…" aria-label="What changed your maximum hit points" spellcheck="false">
-    <button id="maxhp-add" class="btn btn-small" title="Raise (or, with a negative number, lower) your maximum HP until a long rest">Max HP</button>
-  </div>
-  <div id="maxhp-mods" class="maxhp-mods"></div>
-
-  <div class="hp-bar">
-    <button id="rest-short" class="btn btn-small btn-ghost">Short rest</button>
-    <button id="rest-long" class="btn btn-small btn-ghost">Long rest</button>
-  </div>
-
-  <div id="hit-dice" class="hit-dice"></div>
-
-  <!-- Targeting is global state, so the control lives above the tabs: a target
-       picked here applies to a spell attack just as much as a weapon swing. -->
-  <div class="target-bar">
-    <button id="pick-target" class="btn btn-small">Pick target</button>
-    <span id="target-status" class="status">No target</span>
-    <button id="clear-target" class="btn btn-small btn-ghost hidden">Clear</button>
-  </div>
-
-  <div class="init-bar">
-    <button id="roll-initiative" class="btn btn-small btn-primary">Roll initiative</button>
-    <span id="init-queue" class="status">Not in initiative</span>
-  </div>
-  <div id="turn-bar" class="turn-bar hidden" aria-label="This turn"></div>
-
-  <div class="conditions-block">
-    <div id="conditions" class="conditions"></div>
-    <div class="condition-add">
-      <select id="condition-pick" aria-label="Add a condition"></select>
-      <button id="condition-add" class="btn btn-small">Add</button>
+  <!-- AC, speed, initiative and HP in one card. The HP box takes -7 (damage),
+       +5 (healing) or =20 (set); "more" holds the rarer HP business. -->
+  <div class="vitals-card card">
+    <div class="tile"><span class="tile-label">AC</span><span id="v-ac" class="tile-value">—</span></div>
+    <div class="tile"><span class="tile-label">SPD</span><span id="v-speed" class="tile-value">—</span></div>
+    <button id="roll-initiative" class="tile tile-btn" title="Roll initiative"><span class="tile-label">INIT</span><span id="v-init" class="tile-value">—</span></button>
+    <div class="hp-block">
+      <div class="hp-label"><span>HP</span><span id="v-temp" class="hp-temp"></span></div>
+      <div class="hp-row">
+        <div class="hp-meter" aria-hidden="true"><i id="hp-fill"></i><i id="hp-temp-fill" class="is-temp"></i></div>
+        <span id="v-hp" class="hp-num">—</span>
+      </div>
+      <div class="hp-input-row">
+        <input id="hp-input" type="text" inputmode="numeric" placeholder="−7 / +5 / =20" aria-label="Change HP: -7 for damage, +5 for healing, =20 to set" spellcheck="false">
+        <button id="hp-temp-btn" class="btn btn-small" title="Set temporary HP to the number in the box">Temp</button>
+        <button id="hp-more" class="link-btn" aria-expanded="false" aria-controls="hp-drawer">more</button>
+      </div>
     </div>
-    <p id="condition-preview" class="hint"></p>
-    <ul id="condition-effects" class="condition-effects"></ul>
   </div>
 
-  <!-- Roll mode applies to the next roll. Shift/Ctrl-click a roll button is the shortcut. -->
-  <div class="mode-bar" role="radiogroup" aria-label="Roll mode">
-    <button class="mode-btn is-active" data-mode="normal" role="radio" aria-checked="true">Normal</button>
-    <button class="mode-btn" data-mode="advantage" role="radio" aria-checked="false">Advantage</button>
-    <button class="mode-btn" data-mode="disadvantage" role="radio" aria-checked="false">Disadvantage</button>
+  <div id="hp-drawer" class="hp-drawer card hidden">
+    <!-- Changes to maximum HP (Aid, a wraith's Life Drain). Not temp HP: these
+         move the maximum itself, and all of them end on a long rest. -->
+    <div class="drawer-row">
+      <span class="drawer-label">Max HP</span>
+      <input id="maxhp-amount" type="number" value="5" aria-label="Change to maximum hit points, negative to lower it">
+      <input id="maxhp-name" class="maxhp-name" type="text" placeholder="Aid, Life Drain…" aria-label="What changed your maximum hit points" spellcheck="false">
+      <button id="maxhp-add" class="btn btn-small" title="Raise (or, with a negative number, lower) your maximum HP until a long rest">Add</button>
+    </div>
+    <div id="maxhp-mods" class="maxhp-mods"></div>
+    <div class="drawer-row"><span class="drawer-label">Hit dice</span><div id="hit-dice" class="hit-dice"></div></div>
+    <div class="drawer-row">
+      <span class="drawer-label">Rest</span>
+      <button id="rest-short" class="btn btn-small btn-ghost">Short rest</button>
+      <button id="rest-long" class="btn btn-small btn-ghost">Long rest</button>
+    </div>
   </div>
-  <p class="hint mode-hint">Pick a mode above; it stays until you change it. Shift-click and Ctrl-click also work where the host passes modifier keys through.</p>
+
+  <!-- Concentration, buffs and conditions as pills, then the roll mode.
+       Shift/Ctrl-click a roll button is the shortcut for the mode. -->
+  <div class="pill-row">
+    <span id="concentration" class="pill pill-conc hidden"><span id="conc-label"></span><button id="conc-drop" class="chip-btn" title="Drop concentration">×</button></span>
+    <span id="effect-pills" class="pill-group"></span>
+    <span id="conditions" class="pill-group"></span>
+    <select id="condition-pick" class="pill pill-add" aria-label="Add a condition"></select>
+    <button id="condition-add" class="hidden">Add</button>
+    <button id="pick-target-pill" class="pill pill-add hidden" title="Pick a target on the board">◎ Target</button>
+    <div class="mode-bar" role="radiogroup" aria-label="Roll mode" title="Applies to every roll until you change it. Shift-click and Ctrl-click a roll also work where the host passes modifier keys through.">
+      <button class="mode-btn is-active" data-mode="normal" role="radio" aria-checked="true">Normal</button>
+      <button class="mode-btn" data-mode="advantage" role="radio" aria-checked="false">Adv</button>
+      <button class="mode-btn" data-mode="disadvantage" role="radio" aria-checked="false">Dis</button>
+    </div>
+  </div>
+  <!-- What the conditions do to you, one short line each -->
+  <ul id="condition-effects" class="condition-effects"></ul>
+  <p id="condition-preview" class="hidden"></p>
+
+  <!-- In initiative, or with a target picked: whose turn, the target, and this turn's movement and actions -->
+  <div id="combat-card" class="combat-card card hidden">
+    <div class="combat-head">
+      <span id="init-queue" class="combat-turn">Not in initiative</span>
+      <span class="combat-target">
+        <button id="pick-target" class="link-btn">Pick target</button>
+        <span id="target-status" class="status hidden">No target</span>
+        <button id="clear-target" class="chip-btn hidden" title="Clear the target">×</button>
+      </span>
+    </div>
+    <div id="turn-bar" class="turn-bar hidden" aria-label="This turn"></div>
+  </div>
+
   <div id="staged-roll" class="staged-roll hidden"></div>
   <div id="pending-damage" class="pending hidden"></div>
   <div id="effect-inbox" class="inbox"></div>
@@ -161,17 +170,17 @@
 
   <div id="tab-actions" class="tab-panel" role="tabpanel">
 
-    <div id="concentration" class="concentration hidden">
-      <span id="conc-label"></span>
-      <button id="conc-drop" class="btn btn-small btn-ghost">Drop</button>
-    </div>
-
+    <div id="attacks"></div>
+    <div id="resources"></div>
     <section class="effects">
       <div class="effects-head">
         <h2>Active effects</h2>
-        <button id="effect-custom-toggle" class="btn btn-small btn-ghost">Custom…</button>
+        <button id="effect-add-toggle" class="link-btn" aria-expanded="false" aria-controls="effect-add">+ Add</button>
       </div>
+      <div id="effect-list" class="effect-list"></div>
+      <div id="effect-add" class="effect-add card hidden">
       <div id="effect-presets" class="effect-presets"></div>
+      <button id="effect-custom-toggle" class="link-btn">Custom effect…</button>
       <form id="effect-custom" class="effect-custom hidden">
         <input id="effect-name" type="text" placeholder="Name, e.g. Bardic Inspiration" spellcheck="false">
         <input id="effect-bonus" type="text" placeholder="+2 or 1d4" spellcheck="false">
@@ -202,8 +211,7 @@
           <button id="weapon-pick-cancel" class="btn btn-small btn-ghost">Cancel</button>
         </div>
       </div>
-
-      <div id="effect-list" class="effect-list"></div>
+      </div>
 
       <!-- Inline rather than a <dialog>: a modal is awkward in a 400px sidebar,
            and this avoids depending on dialog close-event behaviour we can't
@@ -219,8 +227,6 @@
       </div>
     </section>
 
-    <div id="attacks"></div>
-    <div id="resources"></div>
   </div>
 
   <div id="tab-spells" class="tab-panel hidden" role="tabpanel">
@@ -230,11 +236,15 @@
   </div>
 
   <div id="tab-checks" class="tab-panel hidden" role="tabpanel">
+    <div class="stat-strip">
+      <div class="card stat-mini"><span>Proficiency</span><b id="v-prof">—</b></div>
+      <div class="card stat-mini"><span>Passive Perception</span><b id="v-pp">—</b></div>
+    </div>
+    <h2>Ability checks</h2>
+    <div id="abilities" class="grid-rolls"></div>
     <h2>Saving throws</h2>
     <div id="saves" class="grid-rolls"></div>
     <p id="saves-note" class="hint"></p>
-    <h2>Abilities</h2>
-    <div id="abilities" class="grid-rolls"></div>
     <h2>Skills</h2>
     <div id="skills" class="grid-rolls"></div>
   </div>

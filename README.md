@@ -134,6 +134,29 @@ Paste the link, open the JSON URL it gives you, and paste the JSON back. Nothing
 leaves your machine. A hosted adapter would remove the copy-paste step — and add a
 server, a ToS exposure, and a maintenance burden. See §03 of the feasibility doc.
 
+## Layout
+
+Everything above the tabs is one compact header, so the tab you're on starts
+near the top of the panel:
+
+- Name, and whether a mini is linked (*link selected mini* / *unlink*). A GM gets
+  a **GM** button for Party, Monsters and Fights; **☰** switches characters.
+- A vitals card: AC, speed and initiative (click it to roll), and the HP bar
+  with temp HP in blue. *more* opens max HP changes, hit dice and rests.
+- A row of pills: concentration (blue, × drops it), running effects (green),
+  conditions (red, × removes; *+ Condition* adds), and the roll mode.
+- In initiative, or with a target picked, a combat card: the round, whose turn,
+  the target, this turn's movement, and Action / Bonus / Reaction.
+
+Inside the tabs: attacks are cards whose *To hit* tile rolls (damage waits for
+the hit, as always; the Damage and Crit tiles are for reading). Class features
+are rows with pips and *Use*; one with options, like Channel Divinity, opens to
+pick which on the first press. Spells are rows with *Cast* (the cheapest way
+to pay; open the row to upcast or use a pact slot), and casting opens the row
+on its rolls. Checks are tiles; proficient saves are outlined.
+
+Colours follow TaleSpire's theme where it provides them; the gold is its accent.
+
 ## Play state
 
 A sheet has two halves. Everything from the import is a frozen snapshot of what
@@ -141,9 +164,9 @@ D&D Beyond said; everything under `sheet.play` is what has happened since —
 current HP, temp HP, spent slots, used resources, spent hit dice. It persists to
 TaleSpire's campaign storage as you play.
 
-- **HP** — *Damage* and *Heal* apply an amount to yourself. Damage eats temporary
-  hit points first.
-- **Temp HP** — *Temp HP* grants a pool. Temporary hit points don't stack, so
+- **HP** — one box under the HP bar: `-7` (or a bare `7`) is damage, `+5` is
+  healing, `=20` sets it. Damage eats temporary hit points first.
+- **Temp HP** — type the amount and press *Temp* to grant a pool. Temporary hit points don't stack, so
   granting less than you already have is refused with a note rather than applied.
 - **Max HP changes** — Aid, a wraith's Life Drain and the like change your
   *maximum*, which is not the same as temp HP. Enter the amount (negative to
