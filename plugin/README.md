@@ -135,6 +135,8 @@ includes each mini's `position` and `rotation`, so an area-of-effect helper
 | `POST /stat?id=&index=&value=&max=` | Set one of the campaign's 8 named stats (index 0 to 7), e.g. a Temp HP stat; `max` optional. GM only. Added in 0.3.0 |
 | `POST /emote?id=&emote=&on=0\|1` | Remove or add a persistent emote. GM only |
 | `POST /zone?ruler=&name=[&kind=&handles=]` | Keep a placed ruler on the board as one of TaleSpire's area markers, returning its `id`. Uses the live ruler's handles (rulers are shared, so a player's works too), or else `kind` (`sphere`, `line`, `cone`) and `handles` (`x,y,z;x,y,z;…`, a cone's third handle being half its angle in x). GM only. Added in 0.4.0; 0.4.2 sends TaleSpire's `ApplyAoeOp` itself, because `AoeManager.AddAoe` treats a supplied id as an edit and silently drops it |
+| `POST /ruler?kind=` | Open TaleSpire's ruler as `sphere`, `line`, `cone` or `box`, returning its `id`. The symbiote API has no box (cube) ruler; this does. If a panel holds the ruler, it's put away first. GM only. Added in 0.5.0 |
+| `GET /ruler-info?id=` | A ruler's `kind`, whether it's being dragged (`editing`) and its `handles`, or `{ gone: true }`. A box is two opposite corners. TaleSpire sends symbiotes no events for box rulers, so Spirekeeper polls this one. Added in 0.5.0 |
 | `GET /zone-info?id=` | A kept marker's current shape, `{ name, kind, handles: [{x,y,z}] }`, or `{ gone: true }`, so the panel can follow a dragged marker. Added in 0.4.3 |
 | `POST /zone-remove?id=` | Remove an area marker made by `/zone`. GM only. Added in 0.4.0 |
 

@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.18.0";
+  const APP_VERSION = "0.18.1";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1021,8 +1021,9 @@ const App = (() => {
       fx.conc = Boolean(preset.conc);
       fx.once = Boolean(preset.once);
     }
-    // A concentration record pointing at an effect that no longer costs it.
-    if (play.concentration && !play.effects.some((fx) => fx.id === play.concentration.effectId && fx.conc)) {
+    // A concentration record pointing at an effect that no longer costs it. A
+    // spell cast without an effect (Moonbeam, Faerie Fire) has no effect id.
+    if (play.concentration?.effectId && !play.effects.some((fx) => fx.id === play.concentration.effectId && fx.conc)) {
       play.concentration = null;
     }
   }
@@ -1326,12 +1327,14 @@ const App = (() => {
   async function startConcentration(effect) {
     const play = state.sheet.play;
 
-    if (play.concentration && play.concentration.effectId !== effect.id) {
+    // Cast Bless, then add the Bless effect: same concentration, now with its effect
+    const sameSpell = play.concentration && !play.concentration.effectId && play.concentration.name === effect.name;
+    if (play.concentration && play.concentration.effectId !== effect.id && !sameSpell) {
       await endConcentration({ silent: true });
       toast(`Concentration moved to ${effect.name}.`);
     }
 
-    play.concentration = { name: effect.name, effectId: effect.id };
+    play.concentration = { ...(sameSpell ? play.concentration : {}), name: effect.name, effectId: effect.id };
     renderConcentration();
     savePlay();
   }
@@ -1686,6 +1689,8 @@ const App = (() => {
     if (play.concentration && play.concentration.name !== name) {
       await endConcentration();
     }
+    const previous = play.concentration?.zoneId;
+    if (previous && previous !== zoneId) removeKeptZone(previous);
     play.concentration = { ...(play.concentration || {}), name, effectId: play.concentration?.effectId || null, zoneId };
     renderConcentration();
     savePlay();
@@ -3467,6 +3472,7 @@ const App = (() => {
 
       savePlay();
       await announce(`casts ${Rolls.bold(sp.name)} ${Rolls.dim("(free use)")}`);
+      if (sp.concentration) await concentrateOnSpell(sp);
       return;
     }
 
@@ -3486,6 +3492,25 @@ const App = (() => {
 
     const at = level > sp.level ? ` at level ${level}` : "";
     await announce(`casts ${Rolls.bold(sp.name)}${at}`);
+    if (sp.concentration) await concentrateOnSpell(sp);
+  }
+
+  /**
+   * Casting a concentration spell ends the one before it, along with
+   * anything it granted and any zone it kept on the board. Recasting the
+   * same spell is a new casting too.
+   */
+  async function concentrateOnSpell(sp) {
+    const play = state.sheet.play;
+    const before = play.concentration;
+    if (before) {
+      await endConcentration({ silent: true });
+      await announce(`stops concentrating on ${Rolls.bold(before.name)}`);
+    }
+    play.concentration = { name: sp.name, effectId: null, zoneId: null };
+    renderConcentration();
+    savePlay();
+    toast(before ? `Concentrating on ${sp.name}; ${before.name} ended.` : `Concentrating on ${sp.name}.`);
   }
 
   // -------------------------------------------------------------------------
@@ -4722,6 +4747,17 @@ document.addEventListener("DOMContentLoaded", () => {
           const id = `zone-${params.ruler}-${(window.devZones || []).length}`;
           window.devZones = [...(window.devZones || []), { id, name: params.name, kind: params.kind, handles: params.handles }];
           return { ok: true, id, from: "ruler" };
+        }
+        if (path === "/ruler" && method === "POST") {
+          // The box ruler: placed ~300 ms later as window.devBox's corners
+          const id = `box-${Date.now()}`;
+          window.devBoxRuler = { id, kind: params.kind, editing: false,
+            handles: window.devBox || [{ x: -1, y: 0, z: -1 }, { x: 3, y: 0, z: 3 }] };
+          return { ok: true, id };
+        }
+        if (path === "/ruler-info" && method === "GET") {
+          const r = window.devBoxRuler;
+          return r && r.id === params.id ? { ok: true, kind: r.kind, editing: r.editing, handles: r.handles } : { ok: true, gone: true };
         }
         if (path === "/zone-info" && method === "GET") {
           const zone = (window.devZones || []).find((x) => x.id === params.id);

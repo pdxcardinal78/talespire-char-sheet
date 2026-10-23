@@ -154,6 +154,29 @@ const Bridge = (() => {
     }
   }
 
+  /** Open TaleSpire's ruler as sphere, line, cone or box (the API has no box). Returns { ok, id }. */
+  async function startRuler(kind) {
+    if (!canWrite()) return { ok: false, error: "bridge unavailable" };
+    try {
+      const r = await transport("POST", "/ruler", { kind });
+      return r?.ok ? { ok: true, id: r.id } : { ok: false, error: r?.error || "refused (the plugin may be older than 0.5.0)" };
+    } catch {
+      return { ok: false, error: "bridge unreachable" };
+    }
+  }
+
+  /** A ruler's kind, whether it's being dragged, and its handles; { gone: true } once put away. */
+  async function rulerInfo(rulerId) {
+    if (!status.available) return null;
+    try {
+      const r = await transport("GET", "/ruler-info", { id: String(rulerId) });
+      if (!r?.ok) return null;
+      return r.gone ? { gone: true } : { kind: r.kind, editing: Boolean(r.editing), handles: r.handles || [] };
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * A kept zone's current shape: { kind, handles: [{x,y,z}], name }, { gone: true }
    * once it's been removed, or null when the bridge can't say (pre-0.4.3).
@@ -200,7 +223,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, onChange, useTransport,
+    probe, canWrite, setHp, setStat, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, onChange, useTransport,
     get status() { return status; },
   };
 })();

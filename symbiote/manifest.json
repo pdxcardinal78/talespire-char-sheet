@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "name": "Spirekeeper",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "summary": "Play a D&D Beyond character in TaleSpire, and run the party and its monsters as GM.",
   "license": "MIT",
   "entryPoint": "/sheet.html",

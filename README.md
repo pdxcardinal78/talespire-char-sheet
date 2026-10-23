@@ -383,6 +383,10 @@ Concentration is what makes granting safe: it's the mechanism that takes effects
   Haste) marks you as concentrating, shown in a bar above the effects list.
 - Casting a second concentration effect ends the first **and revokes it from everyone
   holding it** — their panels drop it with a note saying you stopped concentrating.
+- Casting a concentration spell from the Spells tab (Moonbeam, Faerie Fire) does the
+  same: the spell before it ends, its kept zone leaves the board, and chat says so.
+  Adding the effect for the spell you just cast (cast Bless, then add Bless) joins
+  that concentration instead of ending it.
 - **Drop** ends it manually. A long rest ends it too.
 
 Wire format is JSON under TaleSpire's 500-character sync cap, broadcast to `"board"`
@@ -985,8 +989,12 @@ TaleSpire's own ruler already set to the right shape; drag it out and let go,
 and a card lists who's inside.
 
 - **Shapes.** Sphere, cylinder and emanation use the sphere ruler; cone and line
-  their own. The API's ruler has no cube, so a cube is placed with the sphere
-  ruler, centre to the middle of a face, and checked as a square.
+  their own (cubes below).
+- **Cubes.** On the GM's machine with the bridge, a cube spell (Faerie Fire,
+  Thunderwave) opens TaleSpire's box ruler: drag it corner to corner. The
+  symbiote API has no box ruler, so a player's panel places a cube with the
+  sphere ruler, centre to the middle of a face, and the GM's plugin still keeps
+  it on the board as a cube.
 - **Who counts.** 5e counts a creature if any part of its space is in the area,
   so each mini counts as a disc half its size across (one tile for Medium, two
   for Large). Close to the grid rule, not identical.

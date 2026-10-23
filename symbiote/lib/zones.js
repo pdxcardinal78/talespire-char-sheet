@@ -117,6 +117,25 @@ const Zones = (() => {
   /** Half a creature's footprint, in tiles. */
   const reach = (c) => Math.max(0.25, (c.scale || 1) * 0.5);
 
+  /**
+   * A cube as a box in tiles, { min, max }. From the GM's box ruler it's the
+   * two opposite corners TaleSpire reports (a flat footprint gets the cube's
+   * height); from the sphere ruler it's a centre and the middle of a face.
+   */
+  function cubeBox(ruler) {
+    if (Array.isArray(ruler.corners) && ruler.corners.length >= 2) {
+      const [a, b] = ruler.corners;
+      const min = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), z: Math.min(a.z, b.z) };
+      const max = { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y), z: Math.max(a.z, b.z) };
+      if (max.y - min.y < 0.5) max.y = min.y + Math.max(max.x - min.x, max.z - min.z);
+      return { min, max };
+    }
+    const c = ruler.startPosition;
+    const half = Math.max(Math.abs(ruler.endPosition.x - c.x), Math.abs(ruler.endPosition.z - c.z),
+      flat(sub(ruler.endPosition, c)) / Math.SQRT2);
+    return { min: { x: c.x - half, y: c.y, z: c.z - half }, max: { x: c.x + half, y: c.y + half * 2, z: c.z + half } };
+  }
+
   /** Is the creature inside the ruler's shape? `ruler` is TaleSpire's rulerResult payload. */
   function contains(shape, ruler, c) {
     const p = { x: c.x, y: c.y, z: c.z };
@@ -126,12 +145,9 @@ const Zones = (() => {
       return len(sub(p, ruler.startPosition)) - r <= radius + 1e-6;
     }
     if (shape === "cube") {
-      // Placed with the sphere ruler: centre, and a handle on the edge of a face
-      const half = Math.max(Math.abs(ruler.endPosition.x - ruler.startPosition.x),
-        Math.abs(ruler.endPosition.z - ruler.startPosition.z),
-        flat(sub(ruler.endPosition, ruler.startPosition)) / Math.SQRT2);
-      const d = sub(p, ruler.startPosition);
-      return Math.abs(d.x) - r <= half && Math.abs(d.z) - r <= half && Math.abs(d.y) <= half * 2;
+      const { min, max } = cubeBox(ruler);
+      return p.x + r >= min.x && p.x - r <= max.x && p.z + r >= min.z && p.z - r <= max.z &&
+        p.y >= min.y - 1 && p.y <= max.y;
     }
     if (shape === "cone") {
       const axis = sub(ruler.endPosition, ruler.startPosition);
@@ -171,7 +187,13 @@ const Zones = (() => {
         for (let i = 0; i + 1 < pts.length; i += 1) total += len(sub(pts[i + 1], pts[i]));
         return total;
       }
-      if (shape === "cube") return flat(sub(ruler.endPosition, ruler.startPosition)) * 2;
+      if (shape === "cube") {
+        if (ruler.corners) {
+          const { min, max } = cubeBox(ruler);
+          return Math.max(max.x - min.x, max.z - min.z);
+        }
+        return flat(sub(ruler.endPosition, ruler.startPosition)) * 2;
+      }
       return len(sub(ruler.endPosition, ruler.startPosition));
     })();
     return Math.round(tiles * units.perTile * 10) / 10;
@@ -179,6 +201,7 @@ const Zones = (() => {
 
   /** Which shape a ruler is, from TaleSpire's payload. */
   function shapeOfRuler(ruler) {
+    if (Array.isArray(ruler?.corners)) return "cube";
     if (Array.isArray(ruler?.positions)) return "line";
     if (ruler && "angle" in ruler && ruler.angle) return "cone";
     return "sphere";
@@ -200,13 +223,31 @@ const Zones = (() => {
     const area = areaOf(spell);
     if (!area) return deps.toast?.(`${spell?.name || "That spell"} has no area to place.`, true);
     await loadUnits();
-    const res = await TS.rulers.startRuler(RULER_KIND[area.shape]);
-    if (failed(res) || !res) {
-      return deps.toast?.(`Couldn't open the ruler (${res?.cause || "no ruler"}). Another tool or symbiote may be using it.`, true);
+    // A cube gets TaleSpire's own box ruler through the GM's bridge; the
+    // symbiote API has no box, so everyone else places it with the sphere
+    const box = area.shape === "cube" && typeof Bridge !== "undefined" && Bridge.canWrite();
+    let rulerId;
+    if (box) {
+      const r = await Bridge.startRuler("box");
+      if (!r.ok) return deps.toast?.(`Couldn't open the box ruler (${r.error}).`, true);
+      rulerId = r.id;
+    } else {
+      let res = await TS.rulers.startRuler(RULER_KIND[area.shape]);
+      // The bridge may be holding the ruler from a cube; it can hand it over
+      if ((failed(res) || !res) && typeof Bridge !== "undefined" && Bridge.canWrite()) {
+        const r = await Bridge.startRuler(RULER_KIND[area.shape]);
+        res = r.ok ? r.id : res;
+      }
+      if (failed(res) || !res) {
+        return deps.toast?.(`Couldn't open the ruler (${res?.cause || "no ruler"}). Another tool or symbiote may be using it.`, true);
+      }
+      rulerId = typeof res === "string" ? res : res.id || res.rulerId;
     }
-    const rulerId = typeof res === "string" ? res : res.id || res.rulerId;
-    pending = { rulerId: String(rulerId), spell, area, startedAt: Date.now() };
-    const how = area.shape === "cube"
+    pending = { rulerId: String(rulerId), spell, area, startedAt: Date.now(), box };
+    if (box) followBox(pending);
+    const how = box
+      ? `drag the box corner to corner, ${area.size} ft on each side`
+      : area.shape === "cube"
       ? `place it centred where the ${area.size} ft cube goes, dragged out to the middle of a face (${area.size / 2} ft)`
       : area.shape === "cone"
         ? `drag it ${area.size} ft from you, angle about 53°`
@@ -250,9 +291,42 @@ const Zones = (() => {
   function rulerFromMarker(info, id) {
     const h = info?.handles || [];
     if (info?.kind === "line") return h.length >= 2 ? { id, positions: h } : null;
+    if (info?.kind === "box") return h.length >= 2 ? { id, corners: [h[0], h[1]] } : null;
     if (h.length < 2) return null;
     if (info?.kind === "cone") return h.length >= 3 ? { id, startPosition: h[0], endPosition: h[1], angle: h[2].x * 2 } : null;
     return { id, startPosition: h[0], endPosition: h[1] };
+  }
+
+  /**
+   * TaleSpire never tells symbiotes about box rulers, so the bridge is asked
+   * for this one's corners while it's ours, and each new placement goes
+   * through the same path as a rulerResult.
+   */
+  function followBox(job) {
+    let last = "";
+    let busy = false;
+    const timer = setInterval(async () => {
+      if (pending !== job) return clearInterval(timer);
+      if (busy) return;
+      busy = true;
+      try {
+        const info = await Bridge.rulerInfo(job.rulerId);
+        if (!info || pending !== job) return;
+        if (info.gone) {
+          pending = null;
+          deps.onRulerGone?.(job.rulerId);
+          return;
+        }
+        if (info.editing || info.handles.length < 2) return;
+        const corners = info.handles.slice(0, 2);
+        const key = JSON.stringify(corners);
+        if (key === last) return;
+        last = key;
+        await onRulerEvent({ kind: "rulerResult", payload: { ruler: { id: job.rulerId, corners } } });
+      } finally {
+        busy = false;
+      }
+    }, 300);
   }
 
   /** Stop following the ruler (the card was closed). */
@@ -272,6 +346,10 @@ const Zones = (() => {
     if (shape === "line") {
       const pts = ruler.positions || [];
       return pts.length >= 2 && pts.length <= 10 ? { kind: "line", handles: pts.map(fmt).join(";") } : null;
+    }
+    if (shape === "cube" && (ruler.corners || (ruler.startPosition && ruler.endPosition))) {
+      const { min, max } = cubeBox(ruler);
+      return { kind: "box", handles: [fmt(min), fmt(max)].join(";") };
     }
     if (!ruler.startPosition || !ruler.endPosition) return null;
     if (shape === "cone") {

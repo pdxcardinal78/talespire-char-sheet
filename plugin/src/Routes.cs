@@ -22,10 +22,10 @@ namespace Spirekeeper.Bridge
             Func<Func<string>, string> onMain, out int status)
         {
             status = 200;
-            bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove";
+            bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove" || path == "/ruler";
             switch (path)
             {
-                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures": case "/zone-info":
+                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures": case "/zone-info": case "/ruler-info": case "/ruler":
                 case "/hp": case "/stat": case "/emote": case "/zone": case "/zone-remove":
                     break;
                 default:
@@ -59,6 +59,8 @@ namespace Spirekeeper.Bridge
                     case "/statuses": return StatusCatalog();
                     case "/creatures": return AllCreatures();
                     case "/zone-info": return ZoneInfo(q["id"]);
+                    case "/ruler-info": return RulerInfo(q["id"]);
+                    case "/ruler": return StartRuler(q["kind"]);
                     case "/hp": return SetHp(q["id"], q["value"], q["max"]);
                     case "/stat": return SetStat(q["id"], q["index"], q["value"], q["max"]);
                     case "/zone": return KeepZone(q["ruler"], q["name"], q["tint"], q["kind"], q["handles"]);
@@ -192,7 +194,7 @@ namespace Spirekeeper.Bridge
                     System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
                 var args = new object[] { rulerId, null };
                 if (tryGet != null && (bool)tryGet.Invoke(null, args) && args[1] is Ruler ruler && !ruler.BeingEdited
-                    && ruler.CurrentModeIndex >= 0 && ruler.CurrentModeIndex <= 2)
+                    && ruler.CurrentModeIndex >= 0 && ruler.CurrentModeIndex <= 3)
                 {
                     using (var list = new Unity.Collections.NativeList<Unity.Mathematics.float3>(8, Unity.Collections.Allocator.Temp))
                     {
@@ -212,7 +214,8 @@ namespace Spirekeeper.Bridge
                     case "sphere": mode = AoeKind.Sphere; break;
                     case "line": mode = AoeKind.Line; break;
                     case "cone": mode = AoeKind.Cone; break;
-                    default: return Json.Err("kind must be sphere, line or cone");
+                    case "box": mode = AoeKind.Box; break;
+                    default: return Json.Err("kind must be sphere, line, cone or box");
                 }
                 from = "saved geometry";
             }
@@ -265,6 +268,62 @@ namespace Spirekeeper.Bridge
             sb.Append(']');
             var kind = mode == AoeKind.Line ? "line" : mode == AoeKind.Cone ? "cone" : mode == AoeKind.Box ? "box" : "sphere";
             return Json.Ok($"\"name\":{Json.Str(name)},\"kind\":\"{kind}\",\"handles\":{sb}");
+        }
+
+        // The ruler's modes, in TaleSpire's order (the same order as AoeKind).
+        // The symbiote API offers the first three; the box (a cube) is only
+        // reachable from here.
+        static readonly string[] RulerKinds = { "sphere", "line", "cone", "box" };
+        const uint BridgeSystemId = 0xFFFFFFF0u; // who holds the ruler tool, as TaleSpire tracks it
+
+        static object FindRuler(RulerId id)
+        {
+            var mgr = typeof(Ruler).Assembly.GetType("RulerManager");
+            var tryGet = mgr?.GetMethod("TryGetRuler",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            var args = new object[] { id, null };
+            return tryGet != null && (bool)tryGet.Invoke(null, args) ? args[1] : null;
+        }
+
+        // Open TaleSpire's ruler in a given mode, as the symbiote API's
+        // startRuler does. If a panel already holds the ruler, it's put away
+        // first: the person asked for a new one.
+        static string StartRuler(string kind)
+        {
+            int mode = Array.IndexOf(RulerKinds, kind ?? "");
+            if (mode < 0) return Json.Err("kind must be sphere, line, cone or box");
+            var result = RulerBoardTool.TrySwitchToTool(BridgeSystemId, mode, out var rulerId);
+            if (result == RulerBoardTool.SwitchResult.InUseByOtherSystem)
+            {
+                SingletonBehaviour<BoardToolManager>.Instance.SwitchToTool<DefaultBoardTool>();
+                result = RulerBoardTool.TrySwitchToTool(BridgeSystemId, mode, out rulerId);
+            }
+            if (result != RulerBoardTool.SwitchResult.Success) return Json.Err("couldn't open the ruler (" + result + ")");
+            BridgePlugin.Log.LogInfo($"Ruler {rulerId} opened as {kind}");
+            return Json.Ok($"\"id\":{Json.Str(rulerId.ToString())}");
+        }
+
+        // A ruler's shape. The symbiote API reports sphere, line and cone
+        // rulers but not boxes, so a box is followed from here.
+        static string RulerInfo(string idStr)
+        {
+            if (!RulerId.TryParse(idStr ?? "", out var rulerId)) return Json.Err("bad ruler id");
+            if (!(FindRuler(rulerId) is Ruler ruler)) return Json.Ok("\"gone\":true");
+            var sb = new System.Text.StringBuilder("[");
+            using (var list = new Unity.Collections.NativeList<Unity.Mathematics.float3>(8, Unity.Collections.Allocator.Temp))
+            {
+                ruler.GetRestingHandleInfo(list);
+                for (int i = 0; i < list.Length; i++)
+                {
+                    var h = list[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append("{\"x\":").Append(Num(h.x)).Append(",\"y\":").Append(Num(h.y)).Append(",\"z\":").Append(Num(h.z)).Append('}');
+                }
+            }
+            sb.Append(']');
+            int m = ruler.CurrentModeIndex;
+            var kind = m >= 0 && m < RulerKinds.Length ? RulerKinds[m] : "unknown";
+            return Json.Ok($"\"kind\":\"{kind}\",\"editing\":{(ruler.BeingEdited ? "true" : "false")},\"handles\":{sb}");
         }
 
         static string RemoveZone(string idStr)
