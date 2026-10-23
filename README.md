@@ -978,6 +978,10 @@ and a card lists who's inside.
   and any error show on the card. Move the ruler after keeping it and Keep
   again to replace the marker. If the ruler has been put away, the GM's plugin
   builds the marker from the shape the card last saw.
+- **While the card is open** it re-checks once a second, so minis walking in or
+  out show up, and so does dragging a kept marker (TaleSpire doesn't tell
+  symbiotes about markers; the GM's bridge reads them). A player's card asks
+  the GM's panel every few seconds.
 - *Post to chat* lists who's inside, leaving hidden minis out.
 
 ## The GM's monster attacks

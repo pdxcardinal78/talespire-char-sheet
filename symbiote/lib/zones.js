@@ -243,6 +243,18 @@ const Zones = (() => {
     deps.onResult?.(result);
   }
 
+  /**
+   * A kept marker's handles (GET /zone-info) as the ruler payload check()
+   * takes. A cone's third handle holds half its angle in x.
+   */
+  function rulerFromMarker(info, id) {
+    const h = info?.handles || [];
+    if (info?.kind === "line") return h.length >= 2 ? { id, positions: h } : null;
+    if (h.length < 2) return null;
+    if (info?.kind === "cone") return h.length >= 3 ? { id, startPosition: h[0], endPosition: h[1], angle: h[2].x * 2 } : null;
+    return { id, startPosition: h[0], endPosition: h[1] };
+  }
+
   /** Stop following the ruler (the card was closed). */
   function release(rulerId) {
     if (pending && (!rulerId || pending.rulerId === String(rulerId))) pending = null;
@@ -300,12 +312,13 @@ const Zones = (() => {
       checked: creatures.length,
       source,
       geometry: geometryOf(shape, ruler),
+      ruler,
     };
   }
 
   return {
     configure, useCreatures, areaOf, describeArea, contains, measured, shapeOfRuler,
-    cast, onRulerEvent, release, geometryOf, check, get pending() { return pending; },
+    cast, onRulerEvent, release, geometryOf, rulerFromMarker, check, get pending() { return pending; },
     _setUnits: (u) => { units = u; },
   };
 })();

@@ -154,7 +154,21 @@ const Bridge = (() => {
     }
   }
 
-  /** Keep a placed ruler on the board as one of TaleSpire's area markers. Returns { ok, id }. */
+  /**
+   * A kept zone's current shape: { kind, handles: [{x,y,z}], name }, { gone: true }
+   * once it's been removed, or null when the bridge can't say (pre-0.4.3).
+   */
+  async function zoneInfo(zoneId) {
+    if (!status.available || !zoneId) return null;
+    try {
+      const r = await transport("GET", "/zone-info", { id: zoneId });
+      if (!r?.ok) return null;
+      return r.gone ? { gone: true } : { kind: r.kind, handles: r.handles || [], name: r.name };
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Keep a zone on the board. `geometry` ({ kind, handles }) lets the plugin
    * build the marker if the ruler has already been put away.
@@ -186,7 +200,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, setEmote, statuses, creatures, keepZone, removeZone, onChange, useTransport,
+    probe, canWrite, setHp, setStat, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, onChange, useTransport,
     get status() { return status; },
   };
 })();

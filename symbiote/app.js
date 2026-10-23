@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.17.3";
+  const APP_VERSION = "0.17.4";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1214,8 +1214,9 @@ const App = (() => {
       keep: prev?.keptId ? "moved" : null,
     };
     renderZoneCard();
+    watchZone();
     if (!state.isGM) {
-      Party.zoneQuery(result.rulerId, result.shape, result.area?.size ?? null).catch(() => {});
+      Party.zoneQuery(result.rulerId, result.shape, result.area?.size ?? null, zoneShown.keptId).catch(() => {});
       setTimeout(() => {
         if (zoneShown?.rulerId === result.rulerId && zoneShown.awaitingGm) {
           zoneShown.awaitingGm = false;
@@ -1223,6 +1224,70 @@ const App = (() => {
         }
       }, 2500);
     }
+  }
+
+  /**
+   * While the card is open, re-check who's inside: minis walk in and out, and
+   * a kept marker can be dragged, which TaleSpire never reports to symbiotes.
+   * The GM's bridge reads the marker where it is now (GET /zone-info) and
+   * every mini once a second. A player's panel asks the GM's every few seconds.
+   */
+  let zoneWatch = null;
+  let zoneTicks = 0;
+  function watchZone() {
+    if (zoneWatch) return;
+    let busy = false;
+    zoneWatch = setInterval(async () => {
+      const z = zoneShown;
+      if (!z) {
+        clearInterval(zoneWatch);
+        zoneWatch = null;
+        return;
+      }
+      if (busy) return;
+      busy = true;
+      try {
+        zoneTicks += 1;
+        if (Bridge.canWrite()) await recheckZone(z);
+        else if (!state.isGM && zoneTicks % 3 === 0) {
+          Party.zoneQuery(z.rulerId, z.shape, z.area?.size ?? null, z.keptId).catch(() => {});
+        }
+      } catch (e) {
+        console.warn("[Spirekeeper] zone re-check", e);
+      } finally {
+        busy = false;
+      }
+    }, 1000);
+  }
+
+  async function recheckZone(z) {
+    let ruler = z.ruler;
+    let markerMoved = false;
+    // Once the ruler has moved on from a kept zone, the ruler is what matters
+    if (z.keptId && z.keep !== "moved") {
+      const info = await Bridge.zoneInfo(z.keptId);
+      if (info?.gone) {
+        if (zoneShown === z && z.keep !== "Its marker has been removed from the board.") {
+          z.keptId = null;
+          setKeepState(z.rulerId, "Its marker has been removed from the board.");
+        }
+        return;
+      }
+      const fromMarker = info && Zones.rulerFromMarker(info, z.rulerId);
+      if (fromMarker) {
+        markerMoved = JSON.stringify(fromMarker) !== JSON.stringify(z.markerRuler || null);
+        ruler = fromMarker;
+      }
+    }
+    if (!ruler) return;
+    const next = await Zones.check(z.shape, ruler, { spell: z.spell, area: z.area });
+    if (zoneShown !== z) return; // closed, or replaced by a new placement meanwhile
+    const ids = (r) => r.inside.map((c) => c.id).join(",");
+    const changed = ids(next) !== ids(z) || next.size !== z.size;
+    if (z.keptId) z.markerRuler = ruler;
+    if (!changed && !markerMoved) return;
+    Object.assign(z, { inside: next.inside, checked: next.checked, source: next.source, size: next.size, offBy: next.offBy });
+    if (changed) renderZoneCard();
   }
 
   function renderZoneCard() {
@@ -1298,7 +1363,7 @@ const App = (() => {
     // Keep's progress shows on the card itself: a toast would sit underneath it
     const keepNote = {
       keeping: state.isGM || Bridge.canWrite() ? "Putting it on the board…" : "Asking the GM's panel to put it on the board…",
-      kept: "On the board for everyone. Move the ruler and Keep again to replace it.",
+      kept: Bridge.canWrite() ? "On the board for everyone. Drag the marker and this list follows it." : "On the board for everyone.",
       moved: "The ruler moved since you kept it. Keep again to replace the marker.",
     }[z.keep] || z.keep;
     if (keepNote) {
@@ -1376,9 +1441,18 @@ const App = (() => {
   }
 
   // GM side of a player's zone requests
-  async function onZoneQuery({ rulerId, shape, size }) {
+  async function onZoneQuery({ rulerId, shape, size, zoneId }) {
     if (!state.isGM) return;
     let ruler = null;
+    // A kept zone is checked where its marker is now, which may have moved
+    const info = zoneId ? await Bridge.zoneInfo(zoneId) : null;
+    if (info && !info.gone) ruler = Zones.rulerFromMarker(info, rulerId);
+    if (ruler) {
+      const area = size ? { shape, size } : null;
+      const result = await Zones.check(shape || Zones.shapeOfRuler(ruler), ruler, { area }, { hideHidden: true });
+      await Party.zoneReply(rulerId, result.inside.map((c) => c.name)).catch(() => {});
+      return;
+    }
     try {
       const infos = await TS.rulers.getMoreInfo([String(rulerId)]);
       ruler = Array.isArray(infos) ? infos.find((r) => String(r?.id) === String(rulerId)) || infos[0] : null;
@@ -4390,6 +4464,15 @@ document.addEventListener("DOMContentLoaded", () => {
           const id = `zone-${params.ruler}-${(window.devZones || []).length}`;
           window.devZones = [...(window.devZones || []), { id, name: params.name, kind: params.kind, handles: params.handles }];
           return { ok: true, id, from: "ruler" };
+        }
+        if (path === "/zone-info" && method === "GET") {
+          const zone = (window.devZones || []).find((x) => x.id === params.id);
+          if (!zone) return { ok: true, gone: true };
+          const handles = (zone.handles || "").split(";").filter(Boolean).map((t) => {
+            const [x, y, z] = t.split(",").map(Number);
+            return { x, y, z };
+          });
+          return { ok: true, name: zone.name, kind: zone.kind, handles };
         }
         if (path === "/zone-remove" && method === "POST") {
           window.devZones = (window.devZones || []).filter((z) => z.id !== params.id);

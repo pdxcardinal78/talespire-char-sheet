@@ -124,8 +124,9 @@ const Party = (() => {
   // Rulers are shared across clients, so a player's panel can ask the GM's,
   // which sees every mini, who is inside a ruler the player placed.
 
-  async function zoneQuery(rulerId, shape, size) {
-    await broadcast({ t: "zq", r: String(rulerId), s: shape, a: size });
+  /** `zoneId`, once the zone is kept, lets the GM's panel check the marker where it is now. */
+  async function zoneQuery(rulerId, shape, size, zoneId) {
+    await broadcast({ t: "zq", r: String(rulerId), s: shape, a: size, ...(zoneId ? { z: String(zoneId) } : {}) });
   }
 
   /** Names inside, trimmed to fit the 500-character sync limit. */
@@ -204,7 +205,7 @@ const Party = (() => {
     } else if (msg.t === "cnd" && handlers.onCondition) {
       handlers.onCondition({ creatureId: msg.c, emoteId: msg.e, on: Boolean(msg.on) });
     } else if (msg.t === "zq" && handlers.onZoneQuery) {
-      handlers.onZoneQuery({ rulerId: msg.r, shape: msg.s, size: msg.a });
+      handlers.onZoneQuery({ rulerId: msg.r, shape: msg.s, size: msg.a, zoneId: msg.z || null });
     } else if (msg.t === "zr" && handlers.onZoneReply) {
       handlers.onZoneReply({ rulerId: msg.r, names: msg.n || [], more: msg.m || 0 });
     } else if (msg.t === "zk" && handlers.onZoneKeep) {

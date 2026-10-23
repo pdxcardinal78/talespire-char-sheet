@@ -25,7 +25,7 @@ namespace Spirekeeper.Bridge
             bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove";
             switch (path)
             {
-                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures":
+                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures": case "/zone-info":
                 case "/hp": case "/stat": case "/emote": case "/zone": case "/zone-remove":
                     break;
                 default:
@@ -58,6 +58,7 @@ namespace Spirekeeper.Bridge
                     case "/creature": return Creature(q["id"]);
                     case "/statuses": return StatusCatalog();
                     case "/creatures": return AllCreatures();
+                    case "/zone-info": return ZoneInfo(q["id"]);
                     case "/hp": return SetHp(q["id"], q["value"], q["max"]);
                     case "/stat": return SetStat(q["id"], q["index"], q["value"], q["max"]);
                     case "/zone": return KeepZone(q["ruler"], q["name"], q["tint"], q["kind"], q["handles"]);
@@ -245,6 +246,25 @@ namespace Spirekeeper.Bridge
                 into.Add(new Unity.Mathematics.float3(x, y, z));
             }
             return true;
+        }
+
+        // A kept zone's current shape, so the panel can re-check who's inside
+        // after the marker is dragged. The symbiote API can't see markers.
+        static string ZoneInfo(string idStr)
+        {
+            if (!NGuid.TryParse(idStr ?? "", out var guid)) return Json.Err("bad zone id");
+            if (!AoeManager.TryGetAoeData(new AoeGuid(guid), out var name, out var mode, out var handles, out _))
+                return Json.Ok("\"gone\":true");
+            var sb = new System.Text.StringBuilder("[");
+            for (int i = 0; i < handles.Length; i++)
+            {
+                var h = handles[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"x\":").Append(Num(h.x)).Append(",\"y\":").Append(Num(h.y)).Append(",\"z\":").Append(Num(h.z)).Append('}');
+            }
+            sb.Append(']');
+            var kind = mode == AoeKind.Line ? "line" : mode == AoeKind.Cone ? "cone" : mode == AoeKind.Box ? "box" : "sphere";
+            return Json.Ok($"\"name\":{Json.Str(name)},\"kind\":\"{kind}\",\"handles\":{sb}");
         }
 
         static string RemoveZone(string idStr)
