@@ -50,25 +50,60 @@ const Zones = (() => {
   };
   const RULER_KIND = { sphere: "sphere", cube: "sphere", cone: "cone", line: "line" };
 
+  // Spells whose bundled SRD text lost the sentence with their size
+  const KNOWN_AREAS = {
+    moonbeam: { shape: "sphere", size: 5 },
+  };
+
+  // Spells that mention a shape without having an area to place: a portion
+  // of a target, a wall's panels, a light radius
+  const NOT_AREAS = new Set([
+    "disintegrate", "wall of ice", "wall of force", "wall of fire", "wall of stone",
+    "flaming sphere", "dancing lights", "forcecage", "private sanctum",
+  ]);
+
+  const U = "(?:feet|foot|ft\\.?)";
+  // Most specific first; each pattern is tried against all of a spell's text
+  // before the next, so a description's "100-foot-long, 5-foot-wide Line"
+  // beats a data field that recorded only the 5
+  const PATTERNS = [
+    // "a 100-foot-long, 5-foot-wide Line"
+    [new RegExp(`(\\d+)[\\s-]*${U}[\\s-]*long\\b[^.]{0,20}?(\\d+)[\\s-]*${U}[\\s-]*wide\\b[^.]{0,12}?\\bline\\b`, "i"), (m) => ["line", m[1], m[2]]],
+    // "a 5-foot-wide, 60-foot-long Line"
+    [new RegExp(`(\\d+)[\\s-]*${U}[\\s-]*wide\\b[^.]{0,20}?(\\d+)[\\s-]*${U}[\\s-]*long\\b[^.]{0,12}?\\bline\\b`, "i"), (m) => ["line", m[2], m[1]]],
+    // "a Line 60 feet long and 10 feet wide"
+    [new RegExp(`\\bline\\b[^.]{0,20}?(\\d+)[\\s-]*${U}[\\s-]*long\\b(?:[^.]{0,20}?(\\d+)[\\s-]*${U}[\\s-]*wide)?`, "i"), (m) => ["line", m[1], m[2]]],
+    // "20-foot-radius Sphere", "10-foot-radius, 40-foot-high Cylinder", "50-foot-radius, 100 foot high Cylinder"
+    [/(\d+)-foot[- ]radius(?:,?\s*\d+[- ]?foot[- ]?(?:high|tall))?,?\s+(sphere|cylinder|emanation|circle)\b/i, (m) => [m[2], m[1]]],
+    // "20 ft. Sphere", "20 feet sphere", "a 15-foot Emanation", "a 15-foot Cone", "a 10-foot Cube"
+    [new RegExp(`(\\d+)[\\s-]*${U}\\s*-?\\s*(sphere|cylinder|emanation|cone|line|cube|square|circle)\\b`, "i"), (m) => [m[2], m[1]]],
+    // "a Cylinder that is 10 feet tall with a 60-foot radius"
+    [/\b(cylinder|sphere)\b[^.]{0,40}?(\d+)-foot[- ]radius/i, (m) => [m[1], m[2]]],
+  ];
+
   /**
    * A spell's area from what the sheet has: D&D Beyond's "20 ft. Sphere", the
-   * SRD's "20 feet sphere", or failing both the description's
-   * "20-foot-radius Sphere". Returns { shape, size } in feet, or null.
+   * SRD's shape and size, or the description's wording. Returns
+   * { shape, size, width? } in feet, or null. Light radii ("sheds Bright Light
+   * in a 20-foot radius") don't match: every pattern needs a shape word.
    */
   function areaOf(spell) {
-    const texts = [spell?.aoe, spell?.description, spell?.desc].filter(Boolean).map(String);
-    for (const t of texts) {
-      let m = /(\d+)\s*(?:ft\.?|feet|foot)\s*-?\s*(sphere|radius|cylinder|emanation|cone|line|cube|square|circle)/i.exec(t);
-      if (!m) m = /(\d+)-foot(?:-(?:radius|long|wide))?\s+(sphere|cylinder|emanation|cone|line|cube|square)/i.exec(t);
-      if (m) {
-        const shape = SHAPES[m[2].toLowerCase()];
-        if (shape) return { shape, size: parseInt(m[1], 10) };
+    const name = String(spell?.name || "").trim().toLowerCase();
+    if (NOT_AREAS.has(name)) return null;
+    const texts = [spell?.description, spell?.desc, spell?.aoe].filter(Boolean).map(String);
+    for (const [re, parts] of PATTERNS) {
+      for (const t of texts) {
+        const m = re.exec(t);
+        if (!m) continue;
+        const [word, size, width] = parts(m);
+        const shape = SHAPES[String(word).toLowerCase()];
+        if (shape) return { shape, size: parseInt(size, 10), ...(width ? { width: parseInt(width, 10) } : {}) };
       }
     }
-    return null;
+    return KNOWN_AREAS[name] || null;
   }
 
-  const describeArea = (a) => (a ? `${a.size} ft ${a.shape}` : "");
+  const describeArea = (a) => (a ? `${a.size} ft ${a.shape}${a.width ? `, ${a.width} ft wide` : ""}` : "");
 
   // --- geometry ------------------------------------------------------------
   //
@@ -207,7 +242,7 @@ const Zones = (() => {
       console.warn("[Spirekeeper] zone creature list", e);
     }
     const area = job?.area || null;
-    const r = area?.shape === "line" ? { ...ruler, widthTiles: 5 / units.perTile } : ruler;
+    const r = area?.shape === "line" ? { ...ruler, widthTiles: (area.width || 5) / units.perTile } : ruler;
     const inside = creatures
       .filter((c) => !(hideHidden && c.hidden))
       .filter((c) => contains(shape, r, c))
