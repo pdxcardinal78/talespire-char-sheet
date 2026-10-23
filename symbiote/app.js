@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.17.5";
+  const APP_VERSION = "0.18.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -971,19 +971,20 @@ const App = (() => {
   // `conc` marks the spells that cost the caster their concentration. Granting one
   // drops whatever they were concentrating on before, and revokes what it gave.
   const EFFECT_PRESETS = [
-    { name: "Bless", bonus: "1d4", targets: ["attack", "save"], conc: true },
-    { name: "Bane", bonus: "-1d4", targets: ["attack", "save"], conc: true },
+    // `lasts` is a Turns.LASTS key: how long it runs once initiative is going
+    { name: "Bless", bonus: "1d4", targets: ["attack", "save"], conc: true, lasts: "r10" },
+    { name: "Bane", bonus: "-1d4", targets: ["attack", "save"], conc: true, lasts: "r10" },
     // Guidance runs its minute whether or not the die has been spent, and the
     // panel has no way to know which check the player is saving it for — so it
     // stays armed and the player ends it themselves (suspend, ×, or dropping
     // concentration). Marked `once`, it switched itself off after the first
     // check of the cast and silently stopped buffing the rest of the minute.
-    { name: "Guidance", bonus: "1d4", targets: ["check"], conc: true },
-    { name: "Resistance", bonus: "1d4", targets: ["save"], once: true, conc: true },
-    { name: "Bardic Inspiration", bonus: "1d6", targets: ["attack", "save", "check"], once: true },
-    { name: "Shield of Faith", bonus: "+2", targets: ["ac"], conc: true },
-    { name: "Shield", bonus: "+5", targets: ["ac"] },
-    { name: "Haste", bonus: "+2", targets: ["ac"], conc: true },
+    { name: "Guidance", bonus: "1d4", targets: ["check"], conc: true, lasts: "r10" },
+    { name: "Resistance", bonus: "1d4", targets: ["save"], once: true, conc: true, lasts: "r10" },
+    { name: "Bardic Inspiration", bonus: "1d6", targets: ["attack", "save", "check"], once: true, lasts: "r100" },
+    { name: "Shield of Faith", bonus: "+2", targets: ["ac"], conc: true, lasts: "r100" },
+    { name: "Shield", bonus: "+5", targets: ["ac"], lasts: "start1" },
+    { name: "Haste", bonus: "+2", targets: ["ac"], conc: true, lasts: "r10" },
     // Weapon effects replace part of an attack instead of adding to it, so they
     // carry an ability and/or damage die rather than just a bonus.
     {
@@ -997,6 +998,7 @@ const App = (() => {
       useSpellAbility: true,
       die: "1d8",
       damageType: "Force",
+      lasts: "r10",
     },
     { name: "Magic Weapon +1", bonus: "+1", targets: ["weapon"], needsWeapon: true, conc: true },
   ];
@@ -1088,6 +1090,9 @@ const App = (() => {
       fromName: effect.fromName || null,
       // Set on the granter's copy: who it went to and whether they took it.
       grantedTo: effect.grantedTo || null,
+      // Counted on its owner's turns (see lib/turns.js); a granted effect
+      // arrives with the caster's countdown already set.
+      expires: effect.expires ? { ...effect.expires } : Turns.expiryFor(effect.lasts || "", null, activeTurnFor(null)),
     };
     play.effects.push(created);
     renderEffects();
@@ -1106,6 +1111,208 @@ const App = (() => {
     renderEffects();
     render();
     savePlay();
+  }
+
+  /** End an effect by hand: withdraw it from anyone holding it, and from concentration. */
+  async function dismissEffect(fx) {
+    if (fx.grantedTo?.length) {
+      await Party.revoke(fx.id, fx.grantedTo.map((r) => r.id)).catch(() => {});
+    }
+    if (state.sheet.play.concentration?.effectId === fx.id) {
+      state.sheet.play.concentration = null;
+      renderConcentration();
+    }
+    removeEffect(fx);
+  }
+
+  function describeExpiry(fx) {
+    const x = fx.expires;
+    const mine = x.of == null || x.of === state.creatureId;
+    return Turns.describe(x, mine ? null : fx.fromName || "the caster", turnSeen?.active === (x.of ?? state.creatureId));
+  }
+
+  // -------------------------------------------------------------------------
+  // Turns (see lib/turns.js)
+  //
+  // Watches the initiative queue for whose turn it is. At each change it ends
+  // effects whose time is up, and when your turn starts it resets this turn's
+  // movement and actions. It counts and says what ended; it never stops you.
+  // -------------------------------------------------------------------------
+
+  let turnSeen = null; // { active, index, round } from the last queue seen
+  let turnQueue = null;
+  let tileFeet = null;
+
+  const activeTurnFor = () => turnSeen?.active ?? null;
+
+  async function feetPerTile() {
+    if (tileFeet) return tileFeet;
+    try {
+      const u = await TS.rulers.getDistanceUnitsForThisCampaign();
+      tileFeet = !failed(u) && u?.numberPerTile ? u.numberPerTile : 5;
+    } catch {
+      tileFeet = 5;
+    }
+    return tileFeet;
+  }
+
+  function onTurnQueue(queue) {
+    turnQueue = queue;
+    const play = state.sheet?.play;
+    // The sheet remembers the last turn it saw, so a reload mid-fight doesn't
+    // replay or lose a boundary
+    const prev = play?.turn?.seen || turnSeen || {};
+    const { boundaries, next, combatOver } = Turns.step(prev, queue);
+    turnSeen = next;
+    if (play) {
+      play.turn = { ...(play.turn || {}), seen: next };
+      if (combatOver) play.turn.mine = null;
+      if (boundaries.length) {
+        // Synchronous bookkeeping first, so an overlapping poll sees the new turn
+        runBoundaries(boundaries).catch((e) => console.error("[Spirekeeper] turn", e));
+      }
+      if (boundaries.length || combatOver) savePlay();
+    }
+    renderTurnBar();
+  }
+
+  async function runBoundaries(boundaries) {
+    const play = state.sheet.play;
+    const me = state.creatureId;
+    const ended = [];
+    for (const b of boundaries) {
+      for (const fx of Turns.tick(play.effects, b, me)) {
+        if (!play.effects.includes(fx)) continue;
+        if (play.concentration?.effectId === fx.id) await endConcentration({ silent: true });
+        else await dismissEffect(fx);
+        ended.push(fx.name);
+      }
+      if (me && b.of === me && b.at === "start") await startMyTurn();
+    }
+    renderEffects();
+    savePlay();
+    const myStart = me && boundaries.some((b) => b.of === me && b.at === "start");
+    if (myStart) {
+      const { speed, why } = currentSpeed();
+      toast(`Your turn: ${speed} ft of movement${why ? ` (${why})` : ""}.${ended.length ? ` ${ended.join(", ")} ended.` : ""}`);
+    } else if (ended.length) {
+      toast(`${ended.join(", ")} ended.`);
+    }
+  }
+
+  async function startMyTurn() {
+    const play = state.sheet.play;
+    let pos = null;
+    try {
+      pos = (await Board.oneCreature(state.creatureId))?.position || null;
+    } catch {
+      /* counted from the first move instead */
+    }
+    play.turn.mine = { round: turnSeen?.round || 1, moved: 0, dashes: 0, lastPos: pos, action: false, bonus: false, reaction: false };
+    renderTurnBar();
+  }
+
+  function isMyTurn() {
+    return Boolean(state.creatureId) && turnSeen?.active === state.creatureId;
+  }
+
+  function currentSpeed() {
+    const s = state.sheet;
+    const mine = s?.play?.turn?.mine;
+    return Turns.speedFor({
+      walk: s?.speeds?.walk,
+      conditions: (s?.play?.conditions || []).map((c) => c.name),
+      effects: s?.play?.effects || [],
+      dashes: isMyTurn() ? mine?.dashes || 0 : 0,
+    });
+  }
+
+  /** Count the linked mini's moves while it's your turn. TaleSpire reports where it was dropped, not the path. */
+  async function trackMovement(pos) {
+    const mine = state.sheet?.play?.turn?.mine;
+    if (!pos || !mine || !isMyTurn()) return;
+    if (!mine.lastPos) {
+      mine.lastPos = pos;
+      return;
+    }
+    const tiles = Turns.tilesBetween(mine.lastPos, pos);
+    mine.lastPos = pos;
+    if (!tiles) return;
+    mine.moved += tiles * (await feetPerTile());
+    renderTurnBar();
+    savePlay();
+  }
+
+  function ensureMine() {
+    const play = state.sheet.play;
+    play.turn = play.turn || {};
+    if (!play.turn.mine) play.turn.mine = { round: turnSeen?.round || 1, moved: 0, dashes: 0, lastPos: null, action: false, bonus: false, reaction: false };
+    return play.turn.mine;
+  }
+
+  function renderTurnBar() {
+    const bar = $("turn-bar");
+    const inQueue = Boolean(state.sheet && state.creatureId && (turnQueue?.items || []).some((i) => i.id === state.creatureId));
+    bar.classList.toggle("hidden", !inQueue);
+    bar.replaceChildren();
+    if (!inQueue) return;
+    const mine = state.sheet.play.turn?.mine || null;
+    const myTurn = isMyTurn();
+    const { speed, why } = currentSpeed();
+
+    const move = document.createElement("span");
+    move.className = "turn-move";
+    if (myTurn) {
+      const moved = mine?.moved || 0;
+      const over = moved > speed;
+      move.classList.toggle("is-over", over);
+      move.innerHTML = `Move <b>${moved}</b> / ${speed} ft` +
+        (why ? ` <span class="sub">${escapeHtml(why)}</span>` : "") +
+        (over ? ` <span class="sub">${moved - speed} over</span>` : "");
+    } else {
+      move.innerHTML = `Speed ${speed} ft${why ? ` <span class="sub">${escapeHtml(why)}</span>` : ""}`;
+    }
+    bar.appendChild(move);
+
+    if (myTurn) {
+      const tweak = (label, title, fn) => {
+        const b = button(label, "btn-ghost", () => {
+          fn(ensureMine());
+          renderTurnBar();
+          savePlay();
+        });
+        b.classList.add("btn-small");
+        b.title = title;
+        bar.appendChild(b);
+      };
+      tweak("Dash", "Add your speed again for this turn", (m) => (m.dashes += 1));
+      tweak("−5", "Moved less than counted", (m) => (m.moved = Math.max(0, m.moved - 5)));
+      tweak("+5", "Moved more than counted (difficult terrain, standing up)", (m) => (m.moved += 5));
+      if ((mine?.moved || 0) || mine?.dashes) tweak("Reset", "Start this turn's movement over", (m) => { m.moved = 0; m.dashes = 0; });
+    }
+
+    const used = document.createElement("span");
+    used.className = "turn-used";
+    // A reaction can be spent on anyone's turn; actions only on your own
+    for (const [key, label] of [["action", "Action"], ["bonus", "Bonus"], ["reaction", "Reaction"]]) {
+      if (key !== "reaction" && !myTurn) continue;
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "turn-chip";
+      const spent = Boolean(mine?.[key]);
+      chip.classList.toggle("is-spent", spent);
+      chip.setAttribute("aria-pressed", spent ? "true" : "false");
+      chip.textContent = label;
+      chip.title = spent ? `${label} used; click to take it back` : `Mark your ${label.toLowerCase()} as used`;
+      chip.onclick = () => {
+        const m = ensureMine();
+        m[key] = !m[key];
+        renderTurnBar();
+        savePlay();
+      };
+      used.appendChild(chip);
+    }
+    bar.appendChild(used);
   }
 
   // -------------------------------------------------------------------------
@@ -1615,7 +1822,7 @@ const App = (() => {
 
     if (reachable.length) {
       try {
-        await Party.grant(fx, reachable.map((r) => r.id), state.me);
+        await Party.grant(fx, reachable.map((r) => r.id), { ...state.me, creatureId: fx.expires?.of ?? state.creatureId });
       } catch (e) {
         toast(`Could not send: ${e.message}`, true);
         for (const r of fx.grantedTo) if (r.status === "pending") r.status = "failed";
@@ -1826,6 +2033,7 @@ const App = (() => {
         fx.weapon ? null : fx.targets.join(", "),
         fx.once ? "once" : null,
         fx.conc ? "concentration" : null,
+        fx.expires ? describeExpiry(fx) : null,
         fx.fromName ? `from ${fx.fromName}` : null,
         receipts ? `→ ${receipts}` : null,
       ].filter(Boolean).join(" · ");
@@ -1857,16 +2065,7 @@ const App = (() => {
       remove.className = "btn btn-small btn-ghost";
       remove.textContent = "×";
       remove.title = fx.fromId ? "Remove" : "Remove (and withdraw from anyone holding it)";
-      remove.onclick = async () => {
-        if (fx.grantedTo?.length) {
-          await Party.revoke(fx.id, fx.grantedTo.map((r) => r.id)).catch(() => {});
-        }
-        if (state.sheet.play.concentration?.effectId === fx.id) {
-          state.sheet.play.concentration = null;
-          renderConcentration();
-        }
-        removeEffect(fx);
-      };
+      remove.onclick = () => dismissEffect(fx);
 
       row.append(remove);
       list.appendChild(row);
@@ -1986,6 +2185,7 @@ const App = (() => {
       return;
     }
     if (!info) return;
+    trackMovement(info.position);
     const hasHp = Boolean(info.hp && info.hp.max > 0);
     const tempStat = Vitals.tempStatOf(info);
     const seen = {
@@ -2614,6 +2814,7 @@ const App = (() => {
   }
 
   function renderInitiative(queue) {
+    onTurnQueue(queue);
     const el = $("init-queue");
 
     if (!queue || !queue.items?.length) {
@@ -2627,13 +2828,14 @@ const App = (() => {
       ? queue.items.findIndex((i) => i.id === state.creatureId)
       : -1;
 
+    const round = turnSeen?.round ? `Round ${turnSeen.round} · ` : "";
     if (mine >= 0 && mine === queue.activeItemIndex) {
-      el.textContent = "Your turn";
+      el.textContent = `${round}Your turn`;
       el.classList.add("is-turn");
     } else {
       el.classList.remove("is-turn");
       const position = mine >= 0 ? ` · you are ${mine + 1}/${queue.items.length}` : "";
-      el.textContent = `Turn: ${active?.name || "—"}${position}`;
+      el.textContent = `${round}Turn: ${active?.name || "—"}${position}`;
     }
   }
 
@@ -4104,7 +4306,8 @@ const App = (() => {
       if (!targets.length) return toast("Pick at least one thing the effect applies to.", true);
       if (!/^[+-]?\d*(d\d+)?$/i.test(bonus)) return toast('Bonus should look like "+2" or "1d4".', true);
 
-      addEffect({ name, bonus, targets, once: $("effect-once").checked });
+      addEffect({ name, bonus, targets, once: $("effect-once").checked, lasts: $("effect-lasts").value });
+      $("effect-lasts").value = "";
       $("effect-name").value = "";
       $("effect-bonus").value = "";
       $("effect-once").checked = false;
@@ -4454,7 +4657,8 @@ document.addEventListener("DOMContentLoaded", () => {
       // calls them turn-entry ids, and in the game they did not match, which is
       // why the tracker labelled everything as outside the encounter.
       initiative: {
-        getQueue: async () => ({
+        // window.devQueue overrides it; then App.onInitiativeUpdated(devQueue) moves the turn
+        getQueue: async () => window.devQueue || ({
           items: [
             { id: "turn-entry-1", name: "Gnoll Pack Lord", kind: "creature" },
             { id: "turn-entry-2", name: "Aranis", kind: "creature" },

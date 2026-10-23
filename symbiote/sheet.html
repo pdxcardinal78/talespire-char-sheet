@@ -127,6 +127,7 @@
     <button id="roll-initiative" class="btn btn-small btn-primary">Roll initiative</button>
     <span id="init-queue" class="status">Not in initiative</span>
   </div>
+  <div id="turn-bar" class="turn-bar hidden" aria-label="This turn"></div>
 
   <div class="conditions-block">
     <div id="conditions" class="conditions"></div>
@@ -182,6 +183,16 @@
           <label><input type="checkbox" value="ac"> AC</label>
           <label><input id="effect-once" type="checkbox"> Once only</label>
         </div>
+        <label class="effect-lasts">Lasts
+          <select id="effect-lasts">
+            <option value="">Until removed</option>
+            <option value="start1">Until the start of my next turn</option>
+            <option value="end1">Until the end of my next turn</option>
+            <option value="r1">1 round</option>
+            <option value="r10">1 minute (10 rounds)</option>
+            <option value="r100">10 minutes (100 rounds)</option>
+          </select>
+        </label>
         <button type="submit" class="btn btn-small btn-primary">Add effect</button>
       </form>
       <div id="weapon-pick-panel" class="grant-panel hidden">
@@ -336,6 +347,7 @@
 <script src="lib/vitals.js"></script>
 <script src="lib/statuses.js"></script>
 <script src="lib/zones.js"></script>
+<script src="lib/turns.js"></script>
 <script src="lib/store.js"></script>
 <script src="lib/rolls.js"></script>
 <script src="lib/party.js"></script>

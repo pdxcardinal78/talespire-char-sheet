@@ -300,6 +300,24 @@ harder to trust than one that reminds you to hold Ctrl, so the reminder is
 visible and the choice stays yours: shift-click a roll for advantage, ctrl-click
 for disadvantage.
 
+### Turns
+
+While initiative runs, the bar shows the round (*Round 2 · Your turn*), and if
+the linked mini is in the queue a strip under it tracks this turn:
+
+- **Movement.** `Move 15 / 30 ft`, counted from the linked mini's moves during
+  your turn, diagonals as one square. TaleSpire reports where a mini is
+  dropped, not the path it took, so a winding route counts short: `+5`/`−5`
+  correct it. *Dash* adds your speed again; Haste doubles it; Grappled,
+  Restrained and the conditions that stop you make it 0. Going over says so in
+  red and stops nothing.
+- **Action, Bonus, Reaction.** Tap to mark one used. They come back when your
+  turn starts; the reaction shows on everyone's turns, since that's when it's
+  usually spent.
+
+The round goes up when the queue wraps back to the top. A GM adding or removing
+someone mid-round doesn't count as a new round.
+
 ## Active effects
 
 Buffs handed to you by other people — Bless, Bardic Inspiration, Shield of Faith —
@@ -324,6 +342,17 @@ bludgeoning) to `1d8+3 / +5` (Wisdom, force). Affected weapons are marked `✦` 
 the effect. Magic Weapon +1 works the same way with a flat bonus.
 
 A custom effect takes a name, a bonus like `+2` or `1d4`, and which rolls it touches.
+**How long it lasts.** Effects can run until removed, until the start or end
+of your next turn, or a number of rounds (1, 10 for a minute, 100 for ten
+minutes). They count down at turn boundaries while initiative runs, and end
+themselves with a note: concentration effects end your concentration too, and
+anything you granted is withdrawn. The presets come with sensible lengths:
+Shield until the start of your next turn, Bless, Bane, Guidance, Haste and
+Shillelagh a minute, Shield of Faith and Bardic Inspiration ten. *End of your
+next turn* cast on your own turn skips that turn's end. A granted effect counts
+on the caster's turns, not yours, so a debuff that lasts "until the start of
+Kree's next turn" ends when Kree goes. Out of initiative nothing counts down.
+
 Click an effect to suspend it, `×` to remove it. Anything marked *once* suspends
 itself after the roll that used it. Guidance isn't one of them — it runs its minute
 and the panel can't know which check you're saving the die for, so it keeps applying

@@ -68,6 +68,9 @@ const Party = (() => {
       to: toPlayerIds,
       fp: from.id,
       fn: from.name,
+      // How long it lasts, counted on the caster's turns: [at, left, kind]
+      ...(effect.expires ? { x: [effect.expires.at, effect.expires.left, effect.expires.lasts || ""] } : {}),
+      ...(from.creatureId ? { fc: from.creatureId } : {}),
     });
   }
 
@@ -187,6 +190,9 @@ const Party = (() => {
         once: Boolean(msg.o),
         fromId: msg.fp,
         fromName: msg.fn,
+        expires: Array.isArray(msg.x) && (msg.x[0] === "start" || msg.x[0] === "end") && msg.x[1] > 0
+          ? { at: msg.x[0], left: Math.min(1000, Math.floor(msg.x[1])), lasts: String(msg.x[2] || ""), of: msg.fc || null }
+          : null,
       });
     } else if (msg.t === "revoke" && handlers.onRevoke) {
       handlers.onRevoke(msg.id);

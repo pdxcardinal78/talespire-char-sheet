@@ -1248,3 +1248,19 @@ textarea {
 .zone-strip-x { background: none; border: 0; color: var(--fg-dim); font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 6px; }
 .zone-strip-x:hover, .zone-strip:hover strong { color: var(--fg); }
 .zone-keep.is-error { color: var(--danger); }
+
+/* ---------- this turn ---------- */
+
+.turn-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: -4px 0 10px; font-size: 13px;
+}
+.turn-move .sub { color: var(--fg-dim); font-size: 12px; }
+.turn-move.is-over b, .turn-move.is-over .sub:last-child { color: var(--danger); }
+.turn-used { display: flex; gap: 4px; margin-left: auto; }
+.turn-chip {
+  background: var(--bg-3); color: var(--fg); border: 1px solid var(--bg-3); border-radius: 999px;
+  padding: 1px 9px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.turn-chip.is-spent { color: var(--fg-dim); text-decoration: line-through; border-style: dashed; border-color: var(--fg-dim); background: none; }
+.effect-lasts { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-dim); }
