@@ -146,7 +146,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.17.1";
+  const APP_VERSION = "0.17.2";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1204,7 +1204,15 @@ const App = (() => {
 
   /** Show who's inside. A player's panel also asks the GM's, which can see every mini. */
   function showZone(result) {
-    zoneShown = { ...result, gmNames: null, awaitingGm: !state.isGM };
+    const prev = zoneShown && zoneShown.rulerId === result.rulerId ? zoneShown : null;
+    zoneShown = {
+      ...result,
+      gmNames: null,
+      awaitingGm: !state.isGM,
+      // Moving a kept zone's ruler leaves the old marker; Keep again replaces it
+      keptId: prev?.keptId || null,
+      keep: prev?.keptId ? "moved" : null,
+    };
     renderZoneCard();
     if (!state.isGM) {
       Party.zoneQuery(result.rulerId, result.shape, result.area?.size ?? null).catch(() => {});
@@ -1276,27 +1284,70 @@ const App = (() => {
       const keep = button("Keep on board", "btn-ghost", () => keepZone(z));
       keep.title = "Leave this area on the board as a TaleSpire marker" +
         (z.spell?.concentration ? "; it goes when you stop concentrating" : "");
+      if (z.keep === "keeping") keep.disabled = true;
+      if (z.keep === "kept") keep.textContent = "Kept ✓";
       actions.appendChild(keep);
     }
     actions.appendChild(button("Close", "btn-ghost", () => {
+      Zones.release(z.rulerId);
       zoneShown = null;
       renderZoneCard();
     }));
     card.appendChild(actions);
+
+    // Keep's progress shows on the card itself: a toast would sit underneath it
+    const keepNote = {
+      keeping: state.isGM || Bridge.canWrite() ? "Putting it on the board…" : "Asking the GM's panel to put it on the board…",
+      kept: "On the board for everyone. Move the ruler and Keep again to replace it.",
+      moved: "The ruler moved since you kept it. Keep again to replace the marker.",
+    }[z.keep] || z.keep;
+    if (keepNote) {
+      const p = document.createElement("p");
+      p.className = "zone-keep" + (z.keepError ? " is-error" : "");
+      p.textContent = keepNote;
+      card.appendChild(p);
+    }
   }
 
   /** Leave the placed ruler on the board as a TaleSpire area marker, via the GM's bridge. */
+  function setKeepState(rulerId, keep, error = false) {
+    if (!zoneShown || String(zoneShown.rulerId) !== String(rulerId)) return;
+    zoneShown.keep = keep;
+    zoneShown.keepError = error;
+    renderZoneCard();
+  }
+
   async function keepZone(z) {
     const name = z.spell?.name || "Zone";
+    const replacing = z.keptId;
+    setKeepState(z.rulerId, "keeping");
     if (Bridge.canWrite()) {
-      const r = await Bridge.keepZone(z.rulerId, name);
-      if (!r.ok) return toast(`Couldn't keep the zone (${r.error}).`, true);
+      const r = await Bridge.keepZone(z.rulerId, name, z.geometry);
+      if (!r.ok) return setKeepState(z.rulerId, `Couldn't keep the zone: ${r.error}.`, true);
+      if (replacing) removeKeptZone(replacing);
+      keptOnCard(z.rulerId, r.id);
       zoneKeptLocally(name, r.id, z.spell);
     } else {
-      pendingKeeps.set(String(z.rulerId), { name, spell: z.spell });
-      await Party.zoneKeep(z.rulerId, name).catch(() => {});
-      toast("Asked the GM's panel to keep it on the board…");
+      const ask = { name, spell: z.spell, replacing };
+      pendingKeeps.set(String(z.rulerId), ask);
+      try {
+        await Party.zoneKeep(z.rulerId, name, z.geometry);
+      } catch (e) {
+        pendingKeeps.delete(String(z.rulerId));
+        return setKeepState(z.rulerId, `Couldn't reach the GM's panel: ${e.message}`, true);
+      }
+      setTimeout(() => {
+        if (pendingKeeps.get(String(z.rulerId)) === ask) {
+          pendingKeeps.delete(String(z.rulerId));
+          setKeepState(z.rulerId, "No GM panel answered. The GM needs Spirekeeper open, with the bridge plugin.", true);
+        }
+      }, 5000);
     }
+  }
+
+  function keptOnCard(rulerId, zoneId) {
+    if (zoneShown && String(zoneShown.rulerId) === String(rulerId)) zoneShown.keptId = zoneId;
+    setKeepState(rulerId, "kept");
   }
 
   const pendingKeeps = new Map(); // rulerId -> { name, spell } a player asked the GM to keep
@@ -1348,17 +1399,23 @@ const App = (() => {
     renderZoneCard();
   }
 
-  async function onZoneKeep({ rulerId, name }) {
+  async function onZoneKeep({ rulerId, name, geometry }) {
     if (!state.isGM || !Bridge.canWrite()) return;
-    const r = await Bridge.keepZone(rulerId, name);
+    const r = await Bridge.keepZone(rulerId, name, geometry);
     if (r.ok) await Party.zoneKept(rulerId, r.id).catch(() => {});
-    else console.warn("[Spirekeeper] couldn't keep a player's zone", r.error);
+    else {
+      console.warn("[Spirekeeper] couldn't keep a player's zone", r.error);
+      await Party.zoneKept(rulerId, null, r.error).catch(() => {});
+    }
   }
 
-  function onZoneKept({ rulerId, zoneId }) {
+  function onZoneKept({ rulerId, zoneId, error }) {
     const ask = pendingKeeps.get(String(rulerId));
     if (!ask) return;
     pendingKeeps.delete(String(rulerId));
+    if (error || !zoneId) return setKeepState(rulerId, `The GM's panel couldn't keep it: ${error || "no zone id"}.`, true);
+    if (ask.replacing) removeKeptZone(ask.replacing);
+    keptOnCard(rulerId, zoneId);
     zoneKeptLocally(ask.name, zoneId, ask.spell);
   }
 
@@ -4294,6 +4351,12 @@ document.addEventListener("DOMContentLoaded", () => {
           const ruler = { id, beingEdited: false, ...(window.devRuler || shapes[kind]) };
           window.devLastRuler = ruler;
           setTimeout(() => onRulerEvent({ kind: "rulerResult", payload: { ruler } }), 300);
+          // Drag the placed ruler: devMoveRuler({ endPosition: {...} }), or devPutAwayRuler()
+          window.devMoveRuler = (patch) => {
+            Object.assign(window.devLastRuler, patch);
+            onRulerEvent({ kind: "rulerResult", payload: { ruler: { ...window.devLastRuler } } });
+          };
+          window.devPutAwayRuler = () => onRulerEvent({ kind: "rulerRemoved", payload: { rulerId: id } });
           return id;
         },
         getMoreInfo: async (ids) => (window.devLastRuler && ids.includes(window.devLastRuler.id) ? [window.devLastRuler] : []),
@@ -4324,8 +4387,9 @@ document.addEventListener("DOMContentLoaded", () => {
           })) };
         }
         if (path === "/zone" && method === "POST") {
-          window.devZones = [...(window.devZones || []), { id: `zone-${params.ruler}`, name: params.name }];
-          return { ok: true, id: `zone-${params.ruler}` };
+          const id = `zone-${params.ruler}-${(window.devZones || []).length}`;
+          window.devZones = [...(window.devZones || []), { id, name: params.name, kind: params.kind, handles: params.handles }];
+          return { ok: true, id, from: "ruler" };
         }
         if (path === "/zone-remove" && method === "POST") {
           window.devZones = (window.devZones || []).filter((z) => z.id !== params.id);

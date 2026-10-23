@@ -967,12 +967,17 @@ and a card lists who's inside.
   answers with the names inside, leaving hidden minis out. If no GM panel
   answers in a couple of seconds, it checks the player's own mini and anything
   they've lassoed, and says so.
+- **Moving it.** The card follows the ruler until you close it: drag a handle
+  and let go, and the list is checked again.
 - **The ruler's size.** If the ruler is more than half a tile off the spell's
   size, the card says so: it measures, it can't resize.
 - **Keep on board.** Leaves the area on the board as one of TaleSpire's area
   markers, through the GM's bridge (a player's panel asks the GM's). For a
   concentration spell it becomes your concentration, so dropping concentration,
-  or casting another concentration spell, clears it from the board.
+  or casting another concentration spell, clears it from the board. Progress
+  and any error show on the card. Move the ruler after keeping it and Keep
+  again to replace the marker. If the ruler has been put away, the GM's plugin
+  builds the marker from the shape the card last saw.
 - *Post to chat* lists who's inside, leaving hidden minis out.
 
 ## The GM's monster attacks

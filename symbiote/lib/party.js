@@ -143,12 +143,19 @@ const Party = (() => {
     await broadcast({ t: "zr", r: String(rulerId), n: list, m: more });
   }
 
-  async function zoneKeep(rulerId, name) {
-    await broadcast({ t: "zk", r: String(rulerId), n: String(name || "").slice(0, 60) });
+  /** Ask the GM's panel to keep a zone; the geometry rides along when it fits. */
+  async function zoneKeep(rulerId, name, geometry) {
+    const msg = { t: "zk", r: String(rulerId), n: String(name || "").slice(0, 50) };
+    if (geometry?.kind && geometry?.handles) {
+      const withGeo = { ...msg, k: geometry.kind, h: geometry.handles };
+      if (JSON.stringify({ v: PROTOCOL, ...withGeo }).length <= MAX_MESSAGE - 20) Object.assign(msg, withGeo);
+    }
+    await broadcast(msg);
   }
 
-  async function zoneKept(rulerId, zoneId) {
-    await broadcast({ t: "zkd", r: String(rulerId), id: zoneId });
+  /** The GM's answer: the zone's id, or why it couldn't be kept. */
+  async function zoneKept(rulerId, zoneId, error) {
+    await broadcast(error ? { t: "zkd", r: String(rulerId), e: String(error).slice(0, 120) } : { t: "zkd", r: String(rulerId), id: zoneId });
   }
 
   async function zoneRemove(zoneId) {
@@ -201,9 +208,9 @@ const Party = (() => {
     } else if (msg.t === "zr" && handlers.onZoneReply) {
       handlers.onZoneReply({ rulerId: msg.r, names: msg.n || [], more: msg.m || 0 });
     } else if (msg.t === "zk" && handlers.onZoneKeep) {
-      handlers.onZoneKeep({ rulerId: msg.r, name: msg.n });
+      handlers.onZoneKeep({ rulerId: msg.r, name: msg.n, geometry: msg.k && msg.h ? { kind: msg.k, handles: msg.h } : null });
     } else if (msg.t === "zkd" && handlers.onZoneKept) {
-      handlers.onZoneKept({ rulerId: msg.r, zoneId: msg.id });
+      handlers.onZoneKept({ rulerId: msg.r, zoneId: msg.id, error: msg.e || null });
     } else if (msg.t === "zx" && handlers.onZoneRemove) {
       handlers.onZoneRemove({ zoneId: msg.id });
     }

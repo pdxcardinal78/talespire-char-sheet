@@ -155,11 +155,17 @@ const Bridge = (() => {
   }
 
   /** Keep a placed ruler on the board as one of TaleSpire's area markers. Returns { ok, id }. */
-  async function keepZone(rulerId, name) {
+  /**
+   * Keep a zone on the board. `geometry` ({ kind, handles }) lets the plugin
+   * build the marker if the ruler has already been put away.
+   */
+  async function keepZone(rulerId, name, geometry) {
     if (!canWrite()) return { ok: false, error: "bridge unavailable" };
     try {
-      const r = await transport("POST", "/zone", { ruler: String(rulerId), name: String(name || "").slice(0, 60) });
-      return r?.ok ? { ok: true, id: r.id } : { ok: false, error: r?.error || "refused" };
+      const params = { ruler: String(rulerId), name: String(name || "").slice(0, 50) };
+      if (geometry?.kind && geometry?.handles) Object.assign(params, { kind: geometry.kind, handles: geometry.handles });
+      const r = await transport("POST", "/zone", params);
+      return r?.ok ? { ok: true, id: r.id, from: r.from } : { ok: false, error: r?.error || "refused" };
     } catch {
       return { ok: false, error: "bridge unreachable" };
     }

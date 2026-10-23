@@ -216,19 +216,57 @@ const Zones = (() => {
     deps.toast?.(`${spell.name}: ${how}, then let go.`);
   }
 
-  /** TaleSpire's rulers.onRulerEvent. Only the ruler this panel started is ours. */
+  /**
+   * TaleSpire's rulers.onRulerEvent. Only the ruler this panel started is ours,
+   * and it stays ours until it's put away or the card is closed: TaleSpire
+   * sends a fresh rulerResult every time a handle is let go, so moving the
+   * ruler re-checks who's inside. 0.17.1 stopped listening after the first.
+   */
+  let seq = 0;
   async function onRulerEvent(event) {
-    if (event?.kind === "rulerRemoved" && pending && String(event.payload?.rulerId) === pending.rulerId) {
-      pending = null;
+    if (event?.kind === "rulerRemoved") {
+      if (pending && String(event.payload?.rulerId) === pending.rulerId) {
+        pending = null;
+        deps.onRulerGone?.(String(event.payload.rulerId));
+      }
       return;
     }
     if (event?.kind !== "rulerResult" || !pending) return;
     const ruler = event.payload?.ruler;
-    if (!ruler || String(ruler.id) !== pending.rulerId) return;
+    if (!ruler || String(ruler.id) !== pending.rulerId || ruler.beingEdited) return;
     const job = pending;
-    pending = null;
+    const mine = ++seq;
     const result = await check(job.area.shape, ruler, job);
+    if (mine !== seq || pending !== job) return; // a newer move, or put away meanwhile
+    result.moved = Boolean(job.placed);
+    job.placed = true;
     deps.onResult?.(result);
+  }
+
+  /** Stop following the ruler (the card was closed). */
+  function release(rulerId) {
+    if (pending && (!rulerId || pending.rulerId === String(rulerId))) pending = null;
+  }
+
+  /**
+   * The ruler as TaleSpire's area-marker handles, so the GM's plugin can keep
+   * the zone even if the ruler itself has been put away: a sphere is centre
+   * and edge, a line its points, and a cone start, end and a third handle
+   * whose x is half the angle in degrees (the API reports the full angle).
+   * A cube is placed with the sphere ruler, so it's kept as that sphere.
+   */
+  function geometryOf(shape, ruler) {
+    const fmt = (p) => [p.x, p.y, p.z].map((n) => Math.round(n * 1000) / 1000).join(",");
+    if (shape === "line") {
+      const pts = ruler.positions || [];
+      return pts.length >= 2 && pts.length <= 10 ? { kind: "line", handles: pts.map(fmt).join(";") } : null;
+    }
+    if (!ruler.startPosition || !ruler.endPosition) return null;
+    if (shape === "cone") {
+      const half = (ruler.angle || 53.13) / 2;
+      return { kind: "cone", handles: [fmt(ruler.startPosition), fmt(ruler.endPosition), `${Math.round(half * 1000) / 1000},0,0`].join(";") };
+    }
+    return { kind: "sphere", handles: [fmt(ruler.startPosition), fmt(ruler.endPosition)].join(";") };
   }
 
   /** Check a placed ruler against every mini we can see. */
@@ -261,12 +299,13 @@ const Zones = (() => {
       inside,
       checked: creatures.length,
       source,
+      geometry: geometryOf(shape, ruler),
     };
   }
 
   return {
     configure, useCreatures, areaOf, describeArea, contains, measured, shapeOfRuler,
-    cast, onRulerEvent, check, get pending() { return pending; },
+    cast, onRulerEvent, release, geometryOf, check, get pending() { return pending; },
     _setUnits: (u) => { units = u; },
   };
 })();
