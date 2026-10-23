@@ -1788,3 +1788,16 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 .turn-prompt { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border-color: var(--info); background: linear-gradient(var(--info-bg), var(--info-bg)), var(--card); }
 .turn-prompt-text { flex: 1 1 100%; font-size: 13px; }
 .turn-prompt-text b { color: var(--info); }
+
+/* ---------- recent events ---------- */
+
+.event-log { margin-top: 16px; border-top: 1px solid var(--gold); padding-top: 8px; }
+.event-head { display: flex; align-items: center; gap: 8px; }
+.event-head h2 { flex: 1; margin: 0; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: var(--gold); }
+.event-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow: auto; }
+.event { display: flex; gap: 8px; align-items: baseline; font-size: 12px; padding: 3px 4px; border-radius: 4px; }
+.event:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
+.event time { color: var(--fg-dim); font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
+.event span { flex: 1; min-width: 0; }
+.event.is-next { box-shadow: inset 2px 0 var(--gold); }
+.event.is-undone span { text-decoration: line-through; opacity: 0.5; }

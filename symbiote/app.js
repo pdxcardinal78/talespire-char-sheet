@@ -48,6 +48,14 @@ const App = (() => {
       renderVersion();
       await detectGM();
       Bridge.probe(); // not awaited: an absent plugin must not slow startup
+      // Board writes report what they replaced, so they can be undone
+      Bridge.onWrite({
+        before: async (id) => {
+          const i = await Board.oneCreature(id);
+          return i ? { name: i.name, hp: i.hp, stats: i.stats } : null;
+        },
+        after: onBoardWrite,
+      });
 
       Party.configure({
         onGrant: onEffectGranted,
@@ -147,7 +155,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.20.1";
+  const APP_VERSION = "0.21.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -756,7 +764,7 @@ const App = (() => {
   /** A monster saying what it just did, in its own voice where there is one. */
   async function monsterAnnounce(text) {
     try {
-      await Rolls.post(Rolls.bold(text), state.speaker?.id || null);
+      await postChat(Rolls.bold(text), state.speaker?.id || null);
     } catch (e) {
       toast(e.message, true);
     }
@@ -1434,6 +1442,189 @@ const App = (() => {
       tempName: recipient?.name || "you",
       source: fx.name,
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // History: recent events and undo
+  //
+  // Every chat line this panel posts is logged with its time. Actions that
+  // change the sheet run inside undoable(): it keeps the play state from just
+  // before, and any board writes made along the way (Bridge reports them with
+  // the values they replaced). Undo pops the newest and puts both back. It's
+  // a stack, so an older action is undone by undoing what came after it.
+  //
+  // Not undone: dice already rolled, and messages already sent to other
+  // panels (a revoked Bless isn't granted back). The chat says what was undone.
+  // -------------------------------------------------------------------------
+
+  const eventLog = []; // { at, html, undoId }
+  const undoStack = []; // { id, label, sheetId, before, board: [] }
+  let tx = null;
+  let undoSeq = 0;
+  const LOG_MAX = 60;
+  const UNDO_MAX = 25;
+
+  /** TextMeshPro's <b> and <color> to HTML, everything else escaped. */
+  function chatToHtml(line) {
+    return escapeHtml(line)
+      .replace(/&lt;(\/?)b&gt;/g, "<$1b>")
+      .replace(/&lt;color=(#[0-9a-fA-F]{3,8})&gt;/g, '<span style="color:$1">')
+      .replace(/&lt;\/color&gt;/g, "</span>");
+  }
+
+  async function postChat(line, speakerId) {
+    logEvent(chatToHtml(line));
+    await Rolls.post(line, speakerId);
+  }
+
+  function logEvent(html) {
+    eventLog.unshift({ at: new Date(), html, undoId: null });
+    if (tx) tx.logged.push(eventLog[0]);
+    eventLog.length = Math.min(eventLog.length, LOG_MAX);
+    renderEventLog();
+  }
+
+  const playSnapshot = () => (state.sheet ? JSON.parse(JSON.stringify(state.sheet.play)) : null);
+
+  /**
+   * Run an action as one undoable step. Nested calls (a smite casting a spell
+   * inside a damage roll) join the outer step. Sync actions commit at once,
+   * so nothing that runs after them in the same tick is swept in.
+   */
+  function undoable(label, fn) {
+    if (tx || restoring) return fn();
+    const mine = { label, sheetId: state.sheetId, before: playSnapshot(), board: [], logged: [] };
+    tx = mine;
+    let result;
+    try {
+      result = fn();
+    } catch (e) {
+      tx = null;
+      throw e;
+    }
+    if (result && typeof result.then === "function") {
+      return result.finally(() => {
+        if (tx === mine) tx = null;
+        commit(mine);
+      });
+    }
+    tx = null;
+    commit(mine);
+    return result;
+  }
+
+  function commit(t) {
+    const now = playSnapshot();
+    const sheetChanged = t.before && JSON.stringify(stripTurn(t.before)) !== JSON.stringify(stripTurn(now));
+    if (!sheetChanged && !t.board.length) return;
+    const entry = { id: ++undoSeq, label: t.label, sheetId: t.sheetId, before: sheetChanged ? t.before : null, board: t.board };
+    undoStack.push(entry);
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+    // The step's last chat line carries the undo mark; a silent step logs its label
+    if (t.logged.length) t.logged[0].undoId = entry.id;
+    else {
+      eventLog.unshift({ at: new Date(), html: escapeHtml(capitalise(t.label)), undoId: entry.id });
+      eventLog.length = Math.min(eventLog.length, LOG_MAX);
+    }
+    renderEventLog();
+  }
+
+  const capitalise = (t) => String(t || "").charAt(0).toUpperCase() + String(t || "").slice(1);
+  // Turn bookkeeping is never undone: rewinding whose turn it is would replay boundaries
+  const stripTurn = (play) => (play ? { ...play, turn: undefined } : play);
+
+  /** A board write, from the bridge: part of the current step, or a step of its own. */
+  function onBoardWrite(rec) {
+    if (restoring) return;
+    if (rec.before.value === rec.after.value && rec.before.max === rec.after.max) return;
+    if (tx) {
+      tx.board.push(rec);
+      return;
+    }
+    const what = rec.kind === "hp"
+      ? `${rec.name || "A mini"}: HP ${rec.before.value} → ${rec.after.value}`
+      : `${rec.name || "A mini"}: ${rec.statName || "stat"} ${rec.before.value} → ${rec.after.value}`;
+    undoStack.push({ id: ++undoSeq, label: what, sheetId: null, before: null, board: [rec] });
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+    eventLog.unshift({ at: new Date(), html: escapeHtml(what), undoId: undoSeq });
+    eventLog.length = Math.min(eventLog.length, LOG_MAX);
+    renderEventLog();
+  }
+
+  let restoring = false;
+
+  async function undoLast() {
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
+    if (entry.before && entry.sheetId !== state.sheetId) {
+      return toast("That was on another character's sheet; switch to it to undo.", true);
+    }
+    undoStack.pop();
+    restoring = true;
+    try {
+      const notes = [];
+      if (entry.before && state.sheet) {
+        const play = state.sheet.play;
+        const condBefore = new Set(entry.before.conditions.map((c) => c.name));
+        const condNow = new Set(play.conditions.map((c) => c.name));
+        const revoked = (play.effects || []).filter((e) => e.grantedTo?.length && !entry.before.effects.some((b) => b.id === e.id));
+        const turn = play.turn;
+        state.sheet.play = { ...entry.before, turn };
+        // Conditions follow onto the mini; HP and temp go out with the vitals report
+        for (const n of condNow) if (!condBefore.has(n)) pushConditionToBoard(n, false);
+        for (const n of condBefore) if (!condNow.has(n)) pushConditionToBoard(n, true);
+        if (revoked.length) notes.push("effects already sent to others weren't taken back");
+        render();
+        renderResources(state.sheet);
+        savePlay();
+        reportVitals();
+      }
+      // Board writes in reverse, back to what they replaced
+      for (const rec of [...entry.board].reverse()) {
+        const r = rec.kind === "hp"
+          ? await Bridge.setHp(rec.id, rec.before.value, rec.before.max, { quiet: true })
+          : await Bridge.setStat(rec.id, rec.index, rec.before.value, rec.before.max, { quiet: true });
+        if (!r.ok) notes.push(`couldn't restore ${rec.name || "a mini"} (${r.error})`);
+      }
+      if (entry.board.length && state.isGM) GM.refresh?.();
+      const item = eventLog.find((e) => e.undoId === entry.id);
+      if (item) item.undone = true;
+      await postChat(`undid: ${escapeText(entry.label)}${notes.length ? ` ${Rolls.dim(`(${notes.join("; ")})`)}` : ""}`, state.creatureId);
+    } finally {
+      restoring = false;
+      renderEventLog();
+    }
+  }
+
+  let logOpen = true;
+  function renderEventLog() {
+    const box = $("event-log");
+    if (!box) return;
+    box.classList.toggle("hidden", !eventLog.length && !undoStack.length);
+    const list = $("event-list");
+    list.classList.toggle("hidden", !logOpen);
+    $("event-toggle").textContent = logOpen ? "▾ hide" : "▸ show";
+    const last = undoStack[undoStack.length - 1];
+    const undo = $("event-undo");
+    undo.disabled = !last;
+    undo.textContent = last ? `↶ Undo` : "↶ Undo";
+    undo.title = last ? `Undo: ${last.label}` : "Nothing to undo";
+    list.replaceChildren();
+    for (const e of eventLog.slice(0, 30)) {
+      const row = document.createElement("li");
+      row.className = `event${e.undone ? " is-undone" : ""}${last && e.undoId === last.id ? " is-next" : ""}`;
+      const t = e.at;
+      row.innerHTML = `<time>${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}</time><span>${e.html}</span>`;
+      if (last && e.undoId === last.id) {
+        const b = document.createElement("button");
+        b.className = "link-btn";
+        b.textContent = "undo";
+        b.title = `Undo: ${last.label}`;
+        b.onclick = undoLast;
+        row.appendChild(b);
+      }
+      list.appendChild(row);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -2949,13 +3140,7 @@ const App = (() => {
       remove.className = "chip-btn";
       remove.textContent = "×";
       remove.title = "Remove";
-      remove.onclick = async () => {
-        play.conditions = play.conditions.filter((x) => x !== c);
-        renderConditions();
-        savePlay();
-        pushConditionToBoard(c.name, false);
-        await announce(`is no longer ${Rolls.bold(c.name)}`);
-      };
+      remove.onclick = () => removeCondition(c);
 
       chip.appendChild(remove);
       box.appendChild(chip);
@@ -3020,6 +3205,15 @@ const App = (() => {
     // have and would otherwise read as one of them.
     el.textContent = help ? `${pick.value}: ${help.self}` : "";
     el.title = help ? conditionTooltip(pick.value, help) : "";
+  }
+
+  async function removeCondition(c) {
+    const play = state.sheet.play;
+    play.conditions = play.conditions.filter((x) => x !== c);
+    renderConditions();
+    savePlay();
+    pushConditionToBoard(c.name, false);
+    await announce(`is no longer ${Rolls.bold(c.name)}`);
   }
 
   async function addCondition(name) {
@@ -3329,7 +3523,7 @@ const App = (() => {
     go.className = "btn btn-small btn-gold feature-use";
     go.textContent = heals ? "Heal" : "Spend";
     go.disabled = left <= 0;
-    go.onclick = async () => {
+    go.onclick = () => undoable(`${heals ? "used" : "spent"} ${r.name}`, async () => {
       const n = parseInt(amount.value, 10);
       if (!Number.isFinite(n) || n <= 0) return toast(`How many ${heals ? "hit points" : "points"}?`, true);
       if (n > left) return toast(`Only ${left} left in ${r.name}.`, true);
@@ -3346,7 +3540,7 @@ const App = (() => {
       } else {
         await announce(`spends ${n} ${Rolls.bold(r.name)}`);
       }
-    };
+    });
     amount.addEventListener("keydown", (e) => {
       if (e.key === "Enter") go.click();
     });
@@ -3512,7 +3706,7 @@ const App = (() => {
     use.className = "btn btn-small";
     use.textContent = spend ? "Use" : "Announce";
     use.disabled = spend ? left <= 0 : false;
-    use.onclick = async () => {
+    use.onclick = () => undoable(`used ${selected ? `${owner.name}: ${selected.name}` : owner.name}`, async () => {
       if (spend) spend();
 
       const label = selected ? `${owner.name}: ${selected.name}` : owner.name;
@@ -3539,7 +3733,7 @@ const App = (() => {
         // on which half of the feature you used — so the roll carries its own name.
         await doRoll({ name: label, damage: selected.roll, damageName: label, kind: "damage" });
       }
-    };
+    });
     box.appendChild(use);
 
     describe();
@@ -3733,16 +3927,20 @@ const App = (() => {
 
     chip.onclick = () => {
       if (used >= available) return;
-      setUsed(used + 1);
-      renderSlots(state.sheet);
-      savePlay();
+      undoable(`spent a ${label} slot`, () => {
+        setUsed(used + 1);
+        renderSlots(state.sheet);
+        savePlay();
+      });
     };
     chip.oncontextmenu = (ev) => {
       ev.preventDefault();
       if (used <= 0) return;
-      setUsed(used - 1);
-      renderSlots(state.sheet);
-      savePlay();
+      undoable(`gave back a ${label} slot`, () => {
+        setUsed(used - 1);
+        renderSlots(state.sheet);
+        savePlay();
+      });
     };
     return chip;
   }
@@ -4488,7 +4686,7 @@ const App = (() => {
       return;
     }
 
-    await Rolls.post(line, ctx.creatureId || state.creatureId);
+    await postChat(line, ctx.creatureId || state.creatureId);
     toast(line.replace(/<[^>]+>/g, ""));
 
     // The GM's own turn runs itself: a monster's attack against a target whose
@@ -4527,7 +4725,7 @@ const App = (() => {
   }
 
   async function announce(text) {
-    await Rolls.post(text, state.creatureId);
+    await postChat(text, state.creatureId);
   }
 
   /** "1d6+3+2d6" -> "1d6+2d6": the dice a crit adds again, without the modifier. */
@@ -4585,13 +4783,13 @@ const App = (() => {
         v.temp == null ? "temp HP unknown" : null,
       ].filter(Boolean);
       const line = `${what}${notes.length ? ` (${notes.join(", ")})` : ""} → ${next.hp}/${v.max ?? "?"}${next.temp ? ` +${next.temp} temp` : ""}`;
-      await Rolls.post(Rolls.bold(line), speakerId);
+      await postChat(Rolls.bold(line), speakerId);
       return toast(line);
     }
 
     // No bridge: the player's own panel applies it (temp first) if it's open
     await Party.hit(target.id, amount, source).catch(() => {});
-    await Rolls.post(Rolls.bold(`${what}.`), speakerId);
+    await postChat(Rolls.bold(`${what}.`), speakerId);
     toast(`${what}. Sent to their panel to apply; if it's closed, they'll need to apply it by hand.`);
   }
 
@@ -4857,6 +5055,11 @@ const App = (() => {
       $("maxhp-name").value = "";
     };
 
+    $("event-undo").onclick = undoLast;
+    $("event-toggle").onclick = () => {
+      logOpen = !logOpen;
+      renderEventLog();
+    };
     $("effect-custom-toggle").onclick = () => $("effect-custom").classList.toggle("hidden");
     $("effect-add-toggle").onclick = () => {
       const open = $("effect-add").classList.toggle("hidden") === false;
@@ -5056,6 +5259,29 @@ const App = (() => {
     if (!structural && !Encounters.isWatching(event?.payload?.id)) return;
     clearTimeout(encounterBoardTimer);
     encounterBoardTimer = setTimeout(refreshBoardHp, 150);
+  }
+
+  // Actions that change the sheet, as undoable steps (see History above)
+  {
+    const wrap = (fn, labelOf) => function (...args) { return undoable(labelOf(...args), () => fn.apply(this, args)); };
+    applyHp = wrap(applyHp, (d) => (d < 0 ? `took ${-d} damage` : `healed ${d}`));
+    setHp = wrap(setHp, (n) => `set HP to ${n}`);
+    grantTempHp = wrap(grantTempHp, (n) => `gained ${n} temp HP`);
+    addMaxHpMod = wrap(addMaxHpMod, (n, name) => `max HP ${n > 0 ? "+" : ""}${n}${name ? ` (${name})` : ""}`);
+    removeMaxHpMod = wrap(removeMaxHpMod, () => "removed a max HP change");
+    addCondition = wrap(addCondition, (name) => `became ${name}`);
+    removeCondition = wrap(removeCondition, (c) => `no longer ${c.name}`);
+    castSpell = wrap(castSpell, (sp, level) => `cast ${sp.name}${level > sp.level ? ` at level ${level}` : ""}`);
+    addEffect = wrap(addEffect, (fx) => `added ${fx.name}`);
+    dismissEffect = wrap(dismissEffect, (fx) => `ended ${fx.name}`);
+    endConcentration = wrap(endConcentration, () => "dropped concentration");
+    shortRest = wrap(shortRest, () => "short rest");
+    longRest = wrap(longRest, () => "long rest");
+    spendHitDie = wrap(spendHitDie, (hd) => `spent a hit die (${hd.die})`);
+    rollPending = wrap(rollPending, (entry) => `${entry.name} damage`);
+    applyMonsterDamage = wrap(applyMonsterDamage, (target, amount, source) => `${source || "a monster"} hit ${target?.name || "a target"} for ${amount}`);
+    onHitFromGm = wrap(onHitFromGm, ({ amount, source }) => `took ${amount} from ${source || "the GM"}`);
+    onTempGrant = wrap(onTempGrant, ({ temp, source }) => `${source || "an effect"}: ${temp} temp HP`);
   }
 
   return { boot, wire, onCreatureEvent, onRollLanded, onRollRemoved: renderStaged, onPickingEnded, showParty, showBestiary, showEncounters, onForeignRoll: offerForeignRoll, onSelectionChanged, onTargetPicked, onInitiativeUpdated: renderInitiative, render, state };

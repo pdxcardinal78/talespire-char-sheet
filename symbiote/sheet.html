@@ -352,6 +352,16 @@
 <div id="toast" class="toast hidden"></div>
 <div id="drop-overlay" class="drop-overlay hidden">Drop a character JSON file</div>
 
+<!-- Recent events, with undo for the last change (see History in app.js) -->
+<section id="event-log" class="event-log hidden" aria-label="Recent events">
+  <div class="event-head">
+    <h2>Recent events</h2>
+    <button id="event-undo" class="btn btn-small btn-gold" disabled>↶ Undo</button>
+    <button id="event-toggle" class="link-btn">▾ hide</button>
+  </div>
+  <ol id="event-list" class="event-list"></ol>
+</section>
+
 <script src="lib/ddb.js"></script>
 <script src="lib/board.js"></script>
 <script src="lib/bridge.js"></script>

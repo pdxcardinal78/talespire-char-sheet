@@ -157,6 +157,26 @@ on its rolls. Checks are tiles; proficient saves are outlined.
 
 Colours follow TaleSpire's theme where it provides them; the gold is its accent.
 
+## Recent events and undo
+
+A **Recent events** card at the bottom of the sheet lists what this panel posted
+to chat, with times: rolls and results, casts, conditions, uses, undos. Changes
+that post nothing (taking damage) are listed too. It covers this session.
+
+**↶ Undo** reverses the newest change, and again for the one before: a stack,
+so an older change is undone by undoing what came after it. Each undoable step
+keeps the sheet's state from just before it, and any board writes made along
+the way: the bridge reads a mini before writing it, so undo writes the old HP
+or temp HP back. One click is one step: a damage roll that cast Divine Smite
+gives the slot back too. The turn tracker's bookkeeping is never rewound.
+
+Covered: HP, temp HP, max HP changes, conditions (on the mini too), slots,
+casts and concentration, feature uses and pools, effects, rests, hit dice,
+damage or temp HP received, and a GM's HP and temp edits to minis (party view,
+fights, automated monster hits). Not undone: dice already rolled, and messages
+already sent to other panels (a revoked Bless isn't granted back); chat gets an
+"undid: ..." line, which says so when that applies.
+
 ## Play state
 
 A sheet has two halves. Everything from the import is a frozen snapshot of what

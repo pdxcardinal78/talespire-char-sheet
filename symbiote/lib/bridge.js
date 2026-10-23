@@ -85,12 +85,35 @@ const Bridge = (() => {
    * Resolves to { ok, error }; never throws, because a failed write should
    * fall back to the panel's own count rather than break the view.
    */
-  async function setHp(creatureId, value, max) {
+  /**
+   * Board writes are reported to a listener with the values they replaced, so
+   * the panel can undo them (see History in app.js). `before(id)` reads a mini
+   * just before it's written; `after(record)` hears about each write that
+   * succeeded. An undo's own writes pass { quiet: true }.
+   */
+  let writeHook = null;
+  function onWrite(hook) {
+    writeHook = hook;
+  }
+  async function readBefore(creatureId, quiet) {
+    if (quiet || !writeHook?.before) return null;
+    try {
+      return await writeHook.before(creatureId);
+    } catch {
+      return null;
+    }
+  }
+
+  async function setHp(creatureId, value, max, { quiet = false } = {}) {
     if (!canWrite()) return { ok: false, error: "bridge unavailable" };
     const params = { id: creatureId, value: String(Math.round(value)) };
     if (Number.isFinite(max) && max > 0) params.max = String(Math.round(max));
     try {
+      const prior = await readBefore(creatureId, quiet);
       const r = await transport("POST", "/hp", params);
+      if (r?.ok && !quiet && prior?.hp) {
+        writeHook?.after?.({ kind: "hp", id: creatureId, name: prior.name, before: { value: prior.hp.value, max: prior.hp.max }, after: { value: Math.round(value), max: params.max ? Number(params.max) : prior.hp.max } });
+      }
       return r?.ok ? { ok: true } : { ok: false, error: r?.error || "write refused" };
     } catch (e) {
       // The plugin went away mid-session (TaleSpire restarted without it)
@@ -105,12 +128,17 @@ const Bridge = (() => {
    * Used for a "Temp HP" stat; the index comes from matching stat names, and
    * the panel never renames stats.
    */
-  async function setStat(creatureId, index, value, max) {
+  async function setStat(creatureId, index, value, max, { quiet = false } = {}) {
     if (!canWrite()) return { ok: false, error: "bridge unavailable" };
     const params = { id: creatureId, index: String(index), value: String(Math.round(value)) };
     if (Number.isFinite(max)) params.max = String(Math.round(max));
     try {
+      const prior = await readBefore(creatureId, quiet);
       const r = await transport("POST", "/stat", params);
+      const was = prior?.stats?.[index];
+      if (r?.ok && !quiet && was) {
+        writeHook?.after?.({ kind: "stat", id: creatureId, name: prior.name, index, statName: was.name, before: { value: was.value, max: was.max }, after: { value: Math.round(value), max: Number(params.max ?? was.max) } });
+      }
       return r?.ok ? { ok: true } : { ok: false, error: r?.error || "write refused" };
     } catch {
       set({ available: false, canGm: false, version: null });
@@ -223,7 +251,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, onChange, useTransport,
+    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, onChange, useTransport,
     get status() { return status; },
   };
 })();
