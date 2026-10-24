@@ -132,15 +132,19 @@ The CLI and the Symbiote share one copy of the logic in `symbiote/lib/ddb.js`.
 D&D Beyond sends no CORS headers, so the panel can't fetch a character itself.
 There are three ways in:
 
-- **With the bridge running** (bridge 0.7.0 or later), the import view has a
-  *Fetch from D&D Beyond* box: paste the character link and press *Fetch*. The
-  plugin isn't a web page, so it fetches the character and hands it to the
-  panel. The character must be set to Public on D&D Beyond; no D&D Beyond login
-  is stored or sent.
+- **Fetch**, with the bridge running (bridge 0.7.0 or later): paste the
+  character link into *Character link* and press *Fetch*. The plugin isn't a
+  web page, so it fetches the character and hands it to the panel. No D&D
+  Beyond login is stored or sent.
+- **Get JSON link**, with or without the bridge: the same box gives the
+  address of the character's data. Open it in your browser, copy what it shows,
+  and paste it into *Paste character JSON*.
 - **The extension** copies a character with your own signed-in session, so
-  private characters work. Paste what it copied.
-- **By hand:** paste the link, open the JSON URL it gives you, and paste the
-  JSON back.
+  private characters work. Paste what it copied into the same box.
+
+Fetch and Get JSON link both need the character set to Public on D&D Beyond.
+Enter in the link box fetches when the bridge is running and gives the JSON
+link when it isn't.
 
 Importing a character that's already in the library updates it in place and
 keeps its table state: current HP, spent slots and resources, conditions,
@@ -1084,6 +1088,10 @@ pairings live in the global library beside your characters and are set once for
 every campaign. Pairings from before 0.23 (each status pointing at one
 condition) are turned round on first load. The GM's panel shares them over
 sync; a player's panel asks for them when it opens.
+
+The list is folded away under its heading at the bottom of the Party view,
+with a count of how many conditions are paired; it stays open or closed as you
+left it.
 
 Once a condition is paired, it works in both directions:
 

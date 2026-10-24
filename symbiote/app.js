@@ -168,7 +168,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.25.0";
+  const APP_VERSION = "0.25.1";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -186,14 +186,14 @@ const App = (() => {
     const raw = $("ddb-link").value.trim();
     const match = raw.match(DDB_ID) || raw.match(/^(\d+)$/);
     if (!match) {
-      setStatus("import-status", "That doesn't look like a D&D Beyond character link.", true);
+      setStatus("fetch-status", "That doesn't look like a D&D Beyond character link.", true);
       return;
     }
     const url = `https://character-service.dndbeyond.com/character/v5/character/${match[1]}`;
     $("json-url").textContent = url;
     $("copy-url").disabled = false;
-    $("step-fetch").classList.remove("dimmed");
-    setStatus("import-status", "");
+    $("step-fetch").classList.remove("hidden");
+    setStatus("fetch-status", "");
   }
 
   async function copyUrl() {
@@ -300,7 +300,7 @@ const App = (() => {
 
   /** The bridge's Fetch: a character link (or bare id) straight into the library. */
   async function fetchFromLink() {
-    const raw = $("ddb-direct").value.trim();
+    const raw = $("ddb-link").value.trim();
     const match = raw.match(DDB_ID) || raw.match(/^(\d+)$/);
     if (!match) return setStatus("fetch-status", "That doesn't look like a D&D Beyond character link.", true);
     const btn = $("ddb-fetch");
@@ -309,7 +309,8 @@ const App = (() => {
     try {
       const parsed = await fetchDdb(match[1]);
       await importParsed(parsed);
-      $("ddb-direct").value = "";
+      $("ddb-link").value = "";
+      $("step-fetch").classList.add("hidden");
       setStatus("fetch-status", "");
     } catch (e) {
       setStatus("fetch-status", e.message, true);
@@ -352,7 +353,8 @@ const App = (() => {
   /** The bridge's fetch and refresh controls appear only while it's running. */
   function renderBridgeImport() {
     const on = Boolean(Bridge.status.available);
-    $("bridge-import").classList.toggle("hidden", !on);
+    $("ddb-fetch").classList.toggle("hidden", !on);
+    $("fetch-hint").classList.toggle("hidden", !on);
     renderLibrary();
   }
 
@@ -3330,6 +3332,8 @@ const App = (() => {
         : "With the bridge running the pickers list every TaleSpire status by name. Without it, only statuses seen on minis appear.";
     top.appendChild(hint);
     const items = Statuses.list();
+    const paired = items.filter((it) => it.emoteId).length;
+    $("status-map-count").textContent = paired ? `${paired} of ${items.length} paired` : "none paired yet";
     const suggested = items.filter((it) => !it.emoteId && it.suggestion).length;
     if (suggested) {
       const btn = document.createElement("button");
@@ -5885,9 +5889,6 @@ const App = (() => {
     $("copy-url").onclick = copyUrl;
     $("import-json").onclick = () => importJson();
     $("ddb-fetch").onclick = fetchFromLink;
-    $("ddb-direct").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") fetchFromLink();
-    });
     $("library-refresh-all").onclick = refreshAll;
     $("open-library").onclick = showImport;
     $("pick-target").onclick = pickTarget;
@@ -5919,6 +5920,11 @@ const App = (() => {
       $("hp-more").setAttribute("aria-expanded", open ? "true" : "false");
       $("hp-more").textContent = open ? "less" : "more";
     };
+    // The pairing list stays as the GM left it, folded by default
+    try { $("status-map-box").open = localStorage.getItem("sheetbridge:statusMapOpen") === "1"; } catch {}
+    $("status-map-box").addEventListener("toggle", () => {
+      try { localStorage.setItem("sheetbridge:statusMapOpen", $("status-map-box").open ? "1" : "0"); } catch {}
+    });
     $("nav-sheet").onclick = () => (state.sheet ? showView("sheet") : showImport());
     $("nav-party").onclick = showParty;
     $("nav-bestiary").onclick = showBestiary;
@@ -6081,8 +6087,9 @@ const App = (() => {
       $("effect-custom").classList.add("hidden");
     };
 
+    // Enter fetches when the bridge can, and otherwise gives the JSON link
     $("ddb-link").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") resolveLink();
+      if (e.key === "Enter") (Bridge.status.available ? fetchFromLink : resolveLink)();
     });
 
     for (const btn of document.querySelectorAll(".mode-btn")) {

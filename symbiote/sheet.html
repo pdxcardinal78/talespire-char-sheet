@@ -20,59 +20,43 @@
   <h1>Spirekeeper</h1>
   <p class="lede">Bring a D&amp;D Beyond character into TaleSpire. <span id="app-version" class="version"></span></p>
 
-  <!-- The extension is the way in now: it reads the character with the player's
-       own D&D Beyond session, so there is no copy-paste of a JSON URL and no
-       requirement to make the character public. The manual route stays for
-       anyone who hasn't installed it, but it is no longer the headline. -->
+  <!-- One character link, two ways in: the bridge fetches it directly, or the
+       JSON link is opened in a browser and the reply pasted below. The paste
+       box also takes what the browser extension copies (private characters). -->
   <div class="import-main">
-    <!-- With the bridge running, it fetches the character itself -->
-    <div id="bridge-import" class="bridge-import hidden">
-      <label class="step-label" for="ddb-direct">Fetch from D&amp;D Beyond</label>
+    <div class="import-link">
+      <label class="step-label" for="ddb-link">Character link</label>
       <div class="row">
-        <input id="ddb-direct" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
-        <button id="ddb-fetch" class="btn btn-primary">Fetch</button>
+        <input id="ddb-link" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
+        <button id="ddb-fetch" class="btn btn-primary hidden" title="The bridge fetches the character and imports it">Fetch</button>
+        <button id="resolve-link" class="btn" title="Get an address to open in your browser, then paste what it shows below">Get JSON link</button>
       </div>
       <p id="fetch-status" class="status"></p>
-      <p class="hint">The bridge fetches it for you. The character must be set to <b>Public</b> on D&amp;D Beyond; for a private one, use the extension below.</p>
+      <div id="step-fetch" class="json-link hidden">
+        <div class="row">
+          <code id="json-url" class="url">—</code>
+          <button id="copy-url" class="btn" disabled>Copy</button>
+        </div>
+        <p class="hint">Open it in your browser, select all, copy, and paste it into the box below.</p>
+      </div>
+      <p class="hint">
+        The character must be set to <b>Public</b> on D&amp;D Beyond.
+        <span id="fetch-hint" class="hidden"><b>Fetch</b> imports it straight away through the bridge.</span>
+        <b>Get JSON link</b> works without the bridge.
+      </p>
     </div>
 
-    <label class="step-label" for="json-input">Paste what the extension copied</label>
+    <label class="step-label" for="json-input">Paste character JSON</label>
     <textarea id="json-input" placeholder="Paste here, or drop a .json file anywhere on this panel" spellcheck="false"></textarea>
     <div class="row">
       <button id="import-json" class="btn btn-primary">Import character</button>
       <span id="import-status" class="status"></span>
     </div>
     <p class="hint">
-      Open your character on D&amp;D Beyond, click the <b>Spirekeeper</b> toolbar button,
-      then <b>Copy</b>. Private characters work — it uses your signed-in session.
+      What the JSON link shows, or what the <b>Spirekeeper</b> browser extension copies.
+      The extension uses your signed-in D&amp;D Beyond session, so private characters work.
     </p>
   </div>
-
-  <details class="import-manual">
-    <summary>No extension? Import by hand</summary>
-    <ol class="steps">
-      <li>
-        <span class="step-label">Paste the character link</span>
-        <div class="row">
-          <input id="ddb-link" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
-          <button id="resolve-link" class="btn">Get JSON URL</button>
-        </div>
-        <p class="hint">This route needs the character set to <b>Public</b> on D&amp;D Beyond. The extension does not.</p>
-      </li>
-
-      <li id="step-fetch" class="dimmed">
-        <span class="step-label">Open that URL and copy the JSON</span>
-        <div class="row">
-          <code id="json-url" class="url">—</code>
-          <button id="copy-url" class="btn" disabled>Copy</button>
-        </div>
-        <p class="hint">
-          D&amp;D Beyond sends no CORS headers, so this panel can't fetch the URL itself.
-          Open it in your browser, select all, copy, and paste it above.
-        </p>
-      </li>
-    </ol>
-  </details>
 
   <div id="library" class="library hidden">
     <div class="library-head">
@@ -311,9 +295,12 @@
   </header>
   <div id="party-list" class="party-list"></div>
 
-  <!-- GM: pair each 5e condition with one of TaleSpire's radial-menu statuses, once -->
-  <h2 class="section-title">Conditions → TaleSpire statuses</h2>
-  <div id="status-map" class="status-map"></div>
+  <!-- GM: pair each 5e condition with one of TaleSpire's radial-menu statuses,
+       once. Set up and then rarely touched, so it stays folded away. -->
+  <details id="status-map-box" class="status-map-box">
+    <summary><span>Conditions → TaleSpire statuses</span><span id="status-map-count" class="sub"></span></summary>
+    <div id="status-map" class="status-map"></div>
+  </details>
 </section>
 
 <!-- GM: monsters. The SRD set ships with the mod; Open5e is opt-in because it
