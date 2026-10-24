@@ -131,6 +131,7 @@ includes each mini's `position` and `rotation`, so an area-of-effect helper
 | `GET /creature?id=` | The same for any mini on the board |
 | `GET /creatures` | Every mini on the board: `[{ id, name, x, y, z, scale, hidden }]`, positions in tiles. Read by reflection from `CreatureManager._creaturesData`; the symbiote API has no "all minis" call. Added in 0.4.1 |
 | `GET /statuses` | TaleSpire's statuses by name: `{ fromMenu, statuses: [{ id, name, icon, menu }] }`. The radial menu's own list (`CreatureMenuBoardTool._statusEmotes`, `menu: true`) merged with the persistent emotes in `EmoteManager.GetCollection()`. Added in 0.4.0; the radial menu list in 0.6.1 |
+| `GET /ddb?id=` | A public character from D&D Beyond's character service, `{ status, character }`, with D&D Beyond's reply passed through (`character` is null when it answers an error with no JSON, as for a private or missing character). The id must be digits and the host is fixed; no D&D Beyond login is used. Runs off the listener thread so a slow fetch doesn't hold up other requests. Any symbiote panel may ask; it's a read. Added in 0.7.0 |
 | `POST /hp?id=&value=&max=` | Set HP; `max` optional. GM only |
 | `POST /stat?id=&index=&value=&max=` | Set one of the campaign's 8 named stats (index 0 to 7), e.g. a Temp HP stat; `max` optional. GM only. Added in 0.3.0 |
 | `POST /emote?id=&emote=&on=0\|1` | Remove or add a persistent emote. GM only |

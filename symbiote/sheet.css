@@ -160,6 +160,10 @@ textarea {
 .status.error { color: var(--danger); }
 
 .library ul { list-style: none; padding: 0; margin: 0; }
+.library-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bridge-import { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.bridge-import .row input { flex: 1; min-width: 0; }
+#fetch-status:empty { display: none; }
 
 .library li {
   display: flex;

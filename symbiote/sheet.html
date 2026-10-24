@@ -25,6 +25,17 @@
        requirement to make the character public. The manual route stays for
        anyone who hasn't installed it, but it is no longer the headline. -->
   <div class="import-main">
+    <!-- With the bridge running, it fetches the character itself -->
+    <div id="bridge-import" class="bridge-import hidden">
+      <label class="step-label" for="ddb-direct">Fetch from D&amp;D Beyond</label>
+      <div class="row">
+        <input id="ddb-direct" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
+        <button id="ddb-fetch" class="btn btn-primary">Fetch</button>
+      </div>
+      <p id="fetch-status" class="status"></p>
+      <p class="hint">The bridge fetches it for you. The character must be set to <b>Public</b> on D&amp;D Beyond; for a private one, use the extension below.</p>
+    </div>
+
     <label class="step-label" for="json-input">Paste what the extension copied</label>
     <textarea id="json-input" placeholder="Paste here, or drop a .json file anywhere on this panel" spellcheck="false"></textarea>
     <div class="row">
@@ -64,7 +75,10 @@
   </details>
 
   <div id="library" class="library hidden">
-    <h2>Imported characters</h2>
+    <div class="library-head">
+      <h2>Imported characters</h2>
+      <button id="library-refresh-all" class="btn btn-small hidden" title="Fetch every character from D&amp;D Beyond again, keeping HP, slots and conditions">Refresh all</button>
+    </div>
     <ul id="library-list"></ul>
     <p id="library-usage" class="hint"></p>
   </div>

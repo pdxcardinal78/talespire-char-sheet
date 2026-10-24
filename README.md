@@ -129,10 +129,29 @@ The CLI and the Symbiote share one copy of the logic in `symbiote/lib/ddb.js`.
 
 ## How importing works today
 
-D&D Beyond sends no CORS headers, so the panel cannot fetch a character itself.
-Paste the link, open the JSON URL it gives you, and paste the JSON back. Nothing
-leaves your machine. A hosted adapter would remove the copy-paste step — and add a
-server, a ToS exposure, and a maintenance burden. See §03 of the feasibility doc.
+D&D Beyond sends no CORS headers, so the panel can't fetch a character itself.
+There are three ways in:
+
+- **With the bridge running** (bridge 0.7.0 or later), the import view has a
+  *Fetch from D&D Beyond* box: paste the character link and press *Fetch*. The
+  plugin isn't a web page, so it fetches the character and hands it to the
+  panel. The character must be set to Public on D&D Beyond; no D&D Beyond login
+  is stored or sent.
+- **The extension** copies a character with your own signed-in session, so
+  private characters work. Paste what it copied.
+- **By hand:** paste the link, open the JSON URL it gives you, and paste the
+  JSON back.
+
+Importing a character that's already in the library updates it in place and
+keeps its table state: current HP, spent slots and resources, conditions,
+effects and what's equipped. Only what D&D Beyond owns (level, features, spells,
+items) changes. With the bridge running, each D&D Beyond character in the
+library has a *Refresh* button, and *Refresh all* updates every one, so a GM can
+pick up the party's level-ups in one go. A private character can't be
+refreshed this way; *Refresh all* names any it skipped.
+
+Only the machine running the bridge can fetch. Players without it import with
+the extension or by hand, as before.
 
 ## Layout
 

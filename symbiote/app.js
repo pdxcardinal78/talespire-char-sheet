@@ -168,7 +168,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.24.0";
+  const APP_VERSION = "0.25.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -216,32 +216,144 @@ const App = (() => {
       setStatus("import-status", "Paste the character JSON first.", true);
       return;
     }
-
-    let sheet;
+    let parsed;
     try {
-      const parsed = JSON.parse(raw);
-      if (parsed.success === false) throw new Error(parsed.message || "D&D Beyond returned an error");
-      sheet = DDB.normalize(parsed);
-      if (!sheet.identity?.name) throw new Error("No character name found — is this a character payload?");
-      // Armour class and ability scores depend on what's worn, so equipping a ring
-      // has to re-derive from source rather than patch the finished sheet. Kept in
-      // compact form; the raw export is roughly a megabyte of builder bookkeeping.
-      sheet.source = DDB.compactPayload(parsed);
+      parsed = JSON.parse(raw);
     } catch (e) {
       setStatus("import-status", `Import failed: ${e.message}`, true);
       return;
     }
-
     try {
-      const id = await Store.saveSheet(sheet);
+      await importParsed(parsed);
       $("json-input").value = "";
       setStatus("import-status", "");
-      renderLibrary();
-      openSheet(id);
-      toast(`Imported ${sheet.identity.name}.`);
     } catch (e) {
-      setStatus("import-status", `Could not save: ${e.message}`, true);
+      setStatus("import-status", e.message, true);
     }
+  }
+
+  /**
+   * A D&D Beyond character (pasted, or fetched by the bridge) into the library.
+   *
+   * A character already in the library keeps its table state: current HP,
+   * spent slots and resources, conditions, effects, what's equipped. Only what
+   * D&D Beyond owns (level, features, spells, items) is replaced. So a refresh
+   * after a level-up or a new item doesn't undo the session.
+   *
+   * `open` shows the sheet; without it the view stays where it is, and an open
+   * sheet that was refreshed redraws in place.
+   */
+  async function importParsed(parsed, { open = true } = {}) {
+    if (parsed?.success === false) throw new Error(parsed.message || "D&D Beyond returned an error");
+    let sheet;
+    try {
+      sheet = DDB.normalize(parsed);
+      if (!sheet.identity?.name) throw new Error("No character name found. Is this a character payload?");
+    } catch (e) {
+      throw new Error(`Import failed: ${e.message}`);
+    }
+    const id = Store.sheetId(sheet);
+    const existing = Store.getSheet(id);
+    if (existing?.play) {
+      sheet = DDB.normalize(parsed, { equipment: existing.play.equipment || {} });
+      sheet.play = existing.play;
+    }
+    // Armour class and ability scores depend on what's worn, so equipping a ring
+    // has to re-derive from source rather than patch the finished sheet. Kept in
+    // compact form; the raw export is roughly a megabyte of builder bookkeeping.
+    sheet.source = DDB.compactPayload(parsed);
+
+    try {
+      await Store.saveSheet(sheet);
+    } catch (e) {
+      throw new Error(`Could not save: ${e.message}`);
+    }
+    renderLibrary();
+    if (open) {
+      openSheet(id);
+      toast(existing ? `Updated ${sheet.identity.name}; HP, slots and conditions kept.` : `Imported ${sheet.identity.name}.`);
+    } else if (state.sheetId === id) {
+      state.sheet = Store.getSheet(id);
+      Store.ensurePlay(state.sheet);
+      lastBoardVitals = null;
+      render(); // even when hidden, so going back to it shows the new sheet
+      renderGmNav();
+    }
+    return { id, name: sheet.identity.name, updated: Boolean(existing) };
+  }
+
+  const PRIVATE_HINT = "D&D Beyond won't share it. Set the character's privacy to Public on D&D Beyond, or import it with the extension.";
+
+  /** Ask the bridge for a character; returns the parsed payload or throws with a reason a person can act on. */
+  async function fetchDdb(characterId) {
+    const r = await Bridge.ddbCharacter(characterId);
+    if (!r.ok) throw new Error(`Couldn't fetch it: ${r.error}.`);
+    const c = r.character;
+    if (r.status === 403 || r.status === 401 || c?.success === false) {
+      if (r.status === 404 || /not found/i.test(c?.message || "")) throw new Error("D&D Beyond has no character with that id.");
+      throw new Error(PRIVATE_HINT);
+    }
+    if (r.status === 404) throw new Error("D&D Beyond has no character with that id.");
+    if (r.status >= 400) throw new Error(`D&D Beyond answered ${r.status}.`);
+    return c;
+  }
+
+  /** The bridge's Fetch: a character link (or bare id) straight into the library. */
+  async function fetchFromLink() {
+    const raw = $("ddb-direct").value.trim();
+    const match = raw.match(DDB_ID) || raw.match(/^(\d+)$/);
+    if (!match) return setStatus("fetch-status", "That doesn't look like a D&D Beyond character link.", true);
+    const btn = $("ddb-fetch");
+    btn.disabled = true;
+    setStatus("fetch-status", "Fetching from D&D Beyond…");
+    try {
+      const parsed = await fetchDdb(match[1]);
+      await importParsed(parsed);
+      $("ddb-direct").value = "";
+      setStatus("fetch-status", "");
+    } catch (e) {
+      setStatus("fetch-status", e.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /** Pull one library character from D&D Beyond again, in place. */
+  async function refreshSheet(id) {
+    const sheet = Store.getSheet(id);
+    if (!sheet || sheet.meta?.source !== "dndbeyond") throw new Error("Not a D&D Beyond character.");
+    const parsed = await fetchDdb(sheet.meta.sourceId);
+    return importParsed(parsed, { open: false });
+  }
+
+  /** Refresh every D&D Beyond character in the library, one after another. */
+  async function refreshAll() {
+    const ids = Store.listSheets().filter((s) => s.meta?.source === "dndbeyond").map((s) => s.meta.sheetId || Store.sheetId(s));
+    if (!ids.length) return;
+    const btn = $("library-refresh-all");
+    btn.disabled = true;
+    const failed = [];
+    let done = 0;
+    for (const id of ids) {
+      const name = Store.getSheet(id)?.identity?.name || id;
+      btn.textContent = `Refreshing ${done + 1} of ${ids.length}…`;
+      try {
+        await refreshSheet(id);
+        done += 1;
+      } catch (e) {
+        failed.push(`${name} (${/Public/.test(e.message) ? "private" : e.message.replace(/\.$/, "")})`);
+      }
+    }
+    btn.disabled = false;
+    btn.textContent = "Refresh all";
+    toast(failed.length ? `Refreshed ${done} of ${ids.length}. Couldn't refresh ${failed.join(", ")}.` : `Refreshed ${done} ${done === 1 ? "character" : "characters"} from D&D Beyond.`, failed.length > 0);
+  }
+
+  /** The bridge's fetch and refresh controls appear only while it's running. */
+  function renderBridgeImport() {
+    const on = Boolean(Bridge.status.available);
+    $("bridge-import").classList.toggle("hidden", !on);
+    renderLibrary();
   }
 
   // -------------------------------------------------------------------------
@@ -912,9 +1024,34 @@ const App = (() => {
         renderLibrary();
       };
 
-      li.append(name, del);
+      const parts = [name];
+      if (Bridge.status.available && sheet.meta?.source === "dndbeyond") {
+        const refresh = document.createElement("button");
+        refresh.className = "btn btn-small btn-ghost";
+        refresh.textContent = "Refresh";
+        const when = sheet.meta.fetchedAt ? new Date(sheet.meta.fetchedAt).toLocaleDateString() : null;
+        refresh.title = `Fetch from D&D Beyond again, keeping HP, slots and conditions${when ? `. Last updated ${when}` : ""}`;
+        refresh.onclick = async () => {
+          refresh.disabled = true;
+          refresh.textContent = "Refreshing…";
+          try {
+            const r = await refreshSheet(id);
+            toast(`Refreshed ${r.name} from D&D Beyond.`);
+          } catch (e) {
+            toast(`${sheet.identity.name}: ${e.message}`, true);
+            refresh.disabled = false;
+            refresh.textContent = "Refresh";
+          }
+        };
+        parts.push(refresh);
+      }
+      parts.push(del);
+      li.append(...parts);
       list.appendChild(li);
     }
+
+    const canRefresh = Bridge.status.available && sheets.some((s) => s.meta?.source === "dndbeyond");
+    $("library-refresh-all").classList.toggle("hidden", !canRefresh || sheets.length < 2);
 
     renderUsage();
   }
@@ -5747,6 +5884,11 @@ const App = (() => {
     $("resolve-link").onclick = resolveLink;
     $("copy-url").onclick = copyUrl;
     $("import-json").onclick = () => importJson();
+    $("ddb-fetch").onclick = fetchFromLink;
+    $("ddb-direct").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") fetchFromLink();
+    });
+    $("library-refresh-all").onclick = refreshAll;
     $("open-library").onclick = showImport;
     $("pick-target").onclick = pickTarget;
     $("clear-target").onclick = clearTarget;
@@ -5832,6 +5974,7 @@ const App = (() => {
     // The bridge appearing or going away changes which HP boxes are editable
     Bridge.onChange((st) => {
       if (st.available && state.isGM) Statuses.loadCatalog();
+      renderBridgeImport();
       Encounters.render();
       GM.render();
       if (st.available && st.canGm) toast("Bridge connected: HP edits now go onto the minis.");
@@ -6413,6 +6556,15 @@ document.addEventListener("DOMContentLoaded", () => {
         if (path === "/zone-remove" && method === "POST") {
           window.devZones = (window.devZones || []).filter((z) => z.id !== params.id);
           return { ok: true };
+        }
+        if (path === "/ddb") {
+          // The sample character for any id; 404 and 403 stand for missing and private
+          if (params.id === "404") return { ok: true, status: 404, character: { success: false, message: "Character not found" } };
+          if (params.id === "403") return { ok: true, status: 403, character: null };
+          await new Promise((r) => setTimeout(r, 300));
+          const c = JSON.parse(await (await fetch("_devsample.json")).text());
+          if (window.devDdbPatch) window.devDdbPatch(c);
+          return { ok: true, status: 200, character: c };
         }
         if (path === "/statuses") {
           // A stand-in for the radial menu's status list; e1 and e2 are on Kree

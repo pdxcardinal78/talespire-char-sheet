@@ -22,10 +22,10 @@ const Bridge = (() => {
   let retryTimer = null;
 
   // Swappable so browser dev mode can fake the plugin (see app.js)
-  let transport = async (method, path, params) => {
+  let transport = async (method, path, params, { timeoutMs = PROBE_TIMEOUT_MS * 4 } = {}) => {
     const qs = params ? `?${new URLSearchParams(params)}` : "";
     const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer = ctl ? setTimeout(() => ctl.abort(), PROBE_TIMEOUT_MS * 4) : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
     try {
       const url = `${BASE}${path}${qs}`; // absolute: the plugin, not this panel's origin
       const res = await fetch(url, { method, signal: ctl?.signal });
@@ -171,6 +171,22 @@ const Bridge = (() => {
     }
   }
 
+  /**
+   * A public character from D&D Beyond, fetched by the plugin (the panel can't:
+   * D&D Beyond sends no CORS headers). Any panel with the bridge may ask; it's
+   * a read. Returns { ok, character, status } or { ok: false, error }.
+   */
+  async function ddbCharacter(id) {
+    if (!status.available) return { ok: false, error: "the bridge isn't running" };
+    try {
+      const r = await transport("GET", "/ddb", { id: String(id) }, { timeoutMs: 30000 });
+      if (!r?.ok) return { ok: false, error: r?.error || "no reply" };
+      return { ok: true, character: r.character, status: r.status };
+    } catch (e) {
+      return { ok: false, error: e?.name === "AbortError" ? "D&D Beyond took too long to answer" : "bridge unreachable" };
+    }
+  }
+
   /** Every mini on the board with position and size, for spell zones. GM's machine only. */
   async function creatures() {
     if (!status.available) return null;
@@ -273,7 +289,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, initiative, setInitiative, onChange, useTransport,
+    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, ddbCharacter, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, initiative, setInitiative, onChange, useTransport,
     get status() { return status; },
   };
 })();

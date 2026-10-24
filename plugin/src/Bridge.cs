@@ -28,7 +28,7 @@ namespace Spirekeeper.Bridge
     {
         public const string Guid = "net.spirekeeper.bridge";
         public const string Name = "Spirekeeper Bridge";
-        public const string Version = "0.6.1";
+        public const string Version = "0.7.0";
         public const int Port = 47817;
 
         internal static ManualLogSource Log;
@@ -200,6 +200,29 @@ namespace Spirekeeper.Bridge
                 using (var r = new StreamReader(req.InputStream, Encoding.UTF8)) body = r.ReadToEnd();
 
             BridgePlugin.Log.LogInfo($"{req.HttpMethod} {req.Url.PathAndQuery}");
+
+            // A D&D Beyond fetch waits seconds on the network. It runs on a pool
+            // thread so the listener keeps answering pings and board requests.
+            if (path == "/ddb")
+            {
+                if (req.HttpMethod != "GET") { Send(res, 405, Json.Err("/ddb must be GET")); return; }
+                var id = req.QueryString["id"];
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    try
+                    {
+                        var ddb = DdbFetch.Character(id, OnMainThread, out var ddbStatus);
+                        Send(res, ddbStatus, ddb);
+                    }
+                    catch (Exception e)
+                    {
+                        BridgePlugin.Log.LogError(e);
+                        try { Send(res, 500, Json.Err(e.GetType().Name + ": " + e.Message)); } catch { }
+                    }
+                });
+                return;
+            }
+
             var reply = Routes.Dispatch(req.HttpMethod, path, req.QueryString, body, OnMainThread, out var status);
             Send(res, status, reply);
         }
