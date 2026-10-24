@@ -7,6 +7,14 @@
 </head>
 <body>
 
+<!-- GM only: the views a GM moves between, with or without a character open -->
+<nav id="gm-nav" class="gm-nav tabs hidden" aria-label="GM views">
+  <button id="nav-sheet" class="tab" type="button" title="Your character, or the character list">Characters</button>
+  <button id="nav-party" class="tab" type="button" title="Everyone on the board">Party</button>
+  <button id="nav-bestiary" class="tab" type="button" title="Monster stat blocks">Monsters</button>
+  <button id="nav-encounters" class="tab" type="button" title="Encounters and initiative">Fights</button>
+</nav>
+
 <!-- Import: shown until a sheet is loaded, and reachable again from the header. -->
 <section id="import-view" class="view">
   <h1>Spirekeeper</h1>
@@ -79,13 +87,7 @@
         <button id="bind-btn" class="link-btn">Link selected mini</button>
       </div>
     </div>
-    <button id="gm-menu-btn" class="icon-btn hidden" aria-haspopup="true" aria-expanded="false" title="GM tools">GM</button>
     <button id="open-library" class="icon-btn" title="Switch or import a character">☰</button>
-    <div id="gm-menu" class="gm-menu hidden" role="menu">
-      <button id="open-party" class="btn btn-ghost hidden" role="menuitem" title="GM: party overview">Party</button>
-      <button id="open-bestiary" class="btn btn-ghost hidden" role="menuitem" title="GM: monsters">Monsters</button>
-      <button id="open-encounters" class="btn btn-ghost hidden" role="menuitem" title="GM: encounters and initiative">Fights</button>
-    </div>
   </header>
 
   <!-- AC, speed, initiative and HP in one card. The HP box takes -7 (damage),
@@ -292,7 +294,6 @@
       <p id="party-meta">—</p>
     </div>
     <button id="party-refresh" class="btn btn-ghost" title="Re-read the board">↻</button>
-    <button id="close-party" class="btn btn-ghost" title="Back to the sheet">✕</button>
   </header>
   <div id="party-list" class="party-list"></div>
 
@@ -310,7 +311,6 @@
       <p id="bestiary-speaker">Rolls post from you</p>
     </div>
     <button id="bestiary-speak" class="btn btn-ghost" title="Post rolls as a mini on the board">Speak as…</button>
-    <button id="close-bestiary" class="btn btn-ghost" title="Back">✕</button>
   </header>
 
   <div class="row bestiary-search">
@@ -337,7 +337,6 @@
       <h1>Fights</h1>
       <p id="encounters-meta">—</p>
     </div>
-    <button id="close-encounters" class="btn btn-ghost" title="Back">✕</button>
   </header>
 
   <div class="row">

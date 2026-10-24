@@ -104,9 +104,17 @@ const App = (() => {
 
       // The "sheetbridge" keys predate the rename and are kept on purpose —
       // changing them would orphan every imported character and saved encounter.
+      // A GM may not play a character, so a GM's panel opens on the GM view it
+      // was last on, or Party; a player's opens their character or the import.
       const last = localStorage.getItem("sheetbridge:last");
-      if (last && Store.getSheet(last)) openSheet(last);
-      else showImport();
+      const hasLast = Boolean(last && Store.getSheet(last));
+      let lastView = null;
+      try { lastView = localStorage.getItem("sheetbridge:view"); } catch {}
+      if (hasLast) openSheet(last);
+      const gmViews = { party: showParty, bestiary: showBestiary, encounters: showEncounters };
+      if (state.isGM && gmViews[lastView]) gmViews[lastView]();
+      else if (state.isGM && !hasLast) showParty();
+      else if (!hasLast) showImport();
     } catch (e) {
       toast(`Startup failed: ${e.message}`, true);
       console.error("[Spirekeeper] boot", e);
@@ -124,7 +132,7 @@ const App = (() => {
   async function detectGM() {
     const conclude = (isGm, why) => {
       state.isGM = isGm;
-      renderGmEntry();
+      renderGmNav();
       console.log(`[Spirekeeper] GM tools ${isGm ? "enabled" : "hidden"} — ${why}`);
     };
 
@@ -160,7 +168,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.23.0";
+  const APP_VERSION = "0.24.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -247,10 +255,7 @@ const App = (() => {
   let initiativePoll = null;
 
   function showEncounters() {
-    for (const id of ["import-view", "sheet-view", "party-view", "bestiary-view"]) {
-      $(id).classList.add("hidden");
-    }
-    $("encounters-view").classList.remove("hidden");
+    showView("encounters");
     renderEncounters();
     refreshBoardHp();
     refreshInitiative();
@@ -260,14 +265,6 @@ const App = (() => {
     // means the order appears whether or not an event came.
     clearInterval(initiativePoll);
     initiativePoll = setInterval(refreshInitiative, 3000);
-  }
-
-  function closeEncounters() {
-    clearInterval(initiativePoll);
-    initiativePoll = null;
-    $("encounters-view").classList.add("hidden");
-    if (state.sheet) $("sheet-view").classList.remove("hidden");
-    else $("import-view").classList.remove("hidden");
   }
 
   function renderEncounters() {
@@ -413,9 +410,9 @@ const App = (() => {
     }
   }
 
-  /** Count of damage rolls waiting, shown on the Fights button. */
+  /** Count of damage rolls waiting, shown on the Fights tab. */
   function renderFightBadge(count) {
-    const btn = $("open-encounters");
+    const btn = $("nav-encounters");
     if (!btn) return;
     btn.textContent = count ? `Fights (${count})` : "Fights";
     btn.classList.toggle("has-waiting", Boolean(count));
@@ -729,17 +726,8 @@ const App = (() => {
    * of the fight.
    */
   function showBestiary() {
-    $("import-view").classList.add("hidden");
-    $("sheet-view").classList.add("hidden");
-    $("party-view").classList.add("hidden");
-    $("bestiary-view").classList.remove("hidden");
+    showView("bestiary");
     if (!$("bestiary-results").childElementCount) Bestiary.runSearch("");
-  }
-
-  function closeBestiary() {
-    $("bestiary-view").classList.add("hidden");
-    if (state.sheet) $("sheet-view").classList.remove("hidden");
-    else $("import-view").classList.remove("hidden");
   }
 
   /**
@@ -805,37 +793,48 @@ const App = (() => {
    * than not offering it.
    */
   function showParty() {
-    $("import-view").classList.add("hidden");
-    $("sheet-view").classList.add("hidden");
-    $("party-view").classList.remove("hidden");
+    showView("party");
     GM.refresh();
   }
 
-  function closeParty() {
-    $("party-view").classList.add("hidden");
-    if (state.sheet) $("sheet-view").classList.remove("hidden");
-    else $("import-view").classList.remove("hidden");
+  /**
+   * Which view is showing. Views are the import/library, the character sheet,
+   * and the GM's Party, Monsters and Fights. One at a time; the choice is
+   * remembered so a GM's panel reopens where it was.
+   */
+  const VIEWS = ["import", "sheet", "party", "bestiary", "encounters"];
+  let currentView = "import";
+  function showView(name) {
+    if (currentView === "encounters" && name !== "encounters") {
+      clearInterval(initiativePoll);
+      initiativePoll = null;
+    }
+    for (const v of VIEWS) $(`${v}-view`).classList.toggle("hidden", v !== name);
+    currentView = name;
+    try { localStorage.setItem("sheetbridge:view", name); } catch {}
+    renderGmNav();
   }
 
-  /** The Party button only makes sense once we know this client can GM. */
-  function renderGmEntry() {
-    $("open-party").classList.toggle("hidden", !state.isGM);
-    $("open-bestiary").classList.toggle("hidden", !state.isGM);
-    $("open-encounters").classList.toggle("hidden", !state.isGM);
-    $("gm-menu-btn").classList.toggle("hidden", !state.isGM);
-    if (!state.isGM) toggleGmMenu(false);
-  }
-
-  function toggleGmMenu(open) {
-    const menu = $("gm-menu");
-    const show = open ?? menu.classList.contains("hidden");
-    menu.classList.toggle("hidden", !show);
-    $("gm-menu-btn").setAttribute("aria-expanded", show ? "true" : "false");
+  /**
+   * The GM's tabs across the top: the character (or Characters, when none is
+   * open), Party, Monsters and Fights. A GM needn't open a character to reach
+   * the GM views. Players never see it.
+   */
+  function renderGmNav() {
+    const nav = $("gm-nav");
+    nav.classList.toggle("hidden", !state.isGM);
+    if (!state.isGM) return;
+    $("nav-sheet").textContent = state.sheet ? state.sheet.identity?.name || "Character" : "Characters";
+    const tabs = { "nav-sheet": ["sheet", "import"], "nav-party": ["party"], "nav-bestiary": ["bestiary"], "nav-encounters": ["encounters"] };
+    for (const [id, views] of Object.entries(tabs)) {
+      const on = views.includes(currentView);
+      $(id).classList.toggle("is-active", on);
+      $(id).setAttribute("aria-current", on ? "page" : "false");
+    }
   }
 
   function showImport() {
-    $("import-view").classList.remove("hidden");
-    $("sheet-view").classList.add("hidden");
+    showView("import");
     renderLibrary();
   }
 
@@ -881,8 +880,7 @@ const App = (() => {
     lastBoardVitals = null;
     localStorage.setItem("sheetbridge:last", id);
 
-    $("import-view").classList.add("hidden");
-    $("sheet-view").classList.remove("hidden");
+    showView("sheet");
     render();
   }
 
@@ -5779,10 +5777,10 @@ const App = (() => {
       $("hp-more").setAttribute("aria-expanded", open ? "true" : "false");
       $("hp-more").textContent = open ? "less" : "more";
     };
-    $("gm-menu-btn").onclick = () => toggleGmMenu();
-    for (const id of ["open-party", "open-bestiary", "open-encounters"]) {
-      $(id).addEventListener("click", () => toggleGmMenu(false));
-    }
+    $("nav-sheet").onclick = () => (state.sheet ? showView("sheet") : showImport());
+    $("nav-party").onclick = showParty;
+    $("nav-bestiary").onclick = showBestiary;
+    $("nav-encounters").onclick = showEncounters;
     $("pick-target-pill").onclick = pickTarget;
     $("maxhp-add").onclick = () => {
       const n = parseInt($("maxhp-amount").value, 10);
@@ -5838,8 +5836,6 @@ const App = (() => {
       GM.render();
       if (st.available && st.canGm) toast("Bridge connected: HP edits now go onto the minis.");
     });
-    $("open-party").onclick = showParty;
-    $("close-party").onclick = closeParty;
     $("party-refresh").onclick = () => GM.refresh();
 
     Bestiary.configure({
@@ -5855,8 +5851,6 @@ const App = (() => {
       scratchContext: scratchSpellContext,
       onError: (m) => toast(m, true),
     });
-    $("open-bestiary").onclick = showBestiary;
-    $("close-bestiary").onclick = closeBestiary;
     $("bestiary-speak").onclick = pickSpeaker;
 
     let searchTimer;
@@ -5914,8 +5908,6 @@ const App = (() => {
       onInboxChange: renderFightBadge,
       onError: (m) => toast(m, true),
     });
-    $("open-encounters").onclick = showEncounters;
-    $("close-encounters").onclick = closeEncounters;
     $("encounter-new").onclick = createEncounter;
     $("bestiary-add-btn").onclick = addCurrentMonsterToEncounter;
 
@@ -5974,9 +5966,10 @@ const App = (() => {
       commitNote();
     };
 
-    for (const tab of document.querySelectorAll(".tab")) {
+    // The sheet's tabs only; the GM tabs at the top are views, wired above
+    for (const tab of document.querySelectorAll("#sheet-view .tab[data-tab]")) {
       tab.onclick = () => {
-        for (const t of document.querySelectorAll(".tab")) {
+        for (const t of document.querySelectorAll("#sheet-view .tab[data-tab]")) {
           const active = t === tab;
           t.classList.toggle("is-active", active);
           t.setAttribute("aria-selected", String(active));

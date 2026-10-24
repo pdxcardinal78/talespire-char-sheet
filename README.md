@@ -136,11 +136,18 @@ server, a ToS exposure, and a maintenance burden. See §03 of the feasibility do
 
 ## Layout
 
-Everything above the tabs is one compact header, so the tab you're on starts
-near the top of the panel:
+A GM gets a row of tabs across the top of every view: their character (or
+**Characters** when none is open), **Party**, **Monsters** and **Fights**. A GM
+doesn't need a character at all: with none imported the panel opens on Party,
+and it reopens on whichever view was last open. A GM who also plays a character
+switches between it and the GM views with the same tabs. The Fights tab shows
+how many damage rolls are waiting. Players don't see the tabs.
 
-- Name, and whether a mini is linked (*link selected mini* / *unlink*). A GM gets
-  a **GM** button for Party, Monsters and Fights; **☰** switches characters.
+Everything above the sheet's own tabs is one compact header, so the tab you're
+on starts near the top of the panel:
+
+- Name, and whether a mini is linked (*link selected mini* / *unlink*).
+  **☰** switches characters.
 - A vitals card: AC, speed and initiative (click it to roll), and the HP bar
   with temp HP in blue. *more* opens max HP changes, hit dice and rests.
 - A row of pills: concentration (blue, × drops it), running effects (green),
@@ -601,8 +608,8 @@ before pressing **Pick target** in browser dev mode.
 ## GM: the party view
 
 A GM's client is given full stats on every mini, where a player sees only their
-own. The **Party** button in the header — hidden unless `players.getMoreInfo`
-reports `canGm` — opens a live read-only view built on that: name, owner, HP with
+own. The **Party** tab, shown only when `players.getMoreInfo` reports `canGm`,
+opens a live read-only view built on that: name, owner, HP with
 a bar, AC, and flying/hidden markers, with the left edge coloured as a character
 passes half and quarter health.
 
