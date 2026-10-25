@@ -7,11 +7,15 @@
  * not one with a count — because they take damage separately and die separately.
  *
  * On hit points there are two possible truths and they have to be ranked. A mini
- * on the board carries its own HP, visible to everyone; the panel cannot write
- * it (no Symbiote can), but a GM sees it live. So: if a linked mini has hit
- * points set in TaleSpire, the board wins and the panel just reports it. If it
- * doesn't — and plenty of GMs never fill them in — the panel keeps the count
- * itself. One number, always, and it says where it came from.
+ * on the board carries its own HP, visible to everyone; a Symbiote cannot write
+ * it, but a GM sees it live. So: if a linked mini has hit points set in
+ * TaleSpire, the board wins. If it doesn't, and plenty of GMs never fill them
+ * in, the panel keeps the count itself. One number, always, and it says where
+ * it came from.
+ *
+ * With the bridge plugin running on the GM's machine (see lib/bridge.js), the
+ * board is writable: edits to a linked combatant go onto the mini, so the
+ * board stays the one truth and every player sees the change.
  */
 
 const Encounters = (() => {
@@ -53,6 +57,8 @@ const Encounters = (() => {
         maxHp: monster.hp ?? null,
         hp: monster.hp ?? null,
         ac: monster.ac ?? null,
+        // Walking speed, for this monster's movement on its turn
+        speed: Number((/^(\d+)\s*ft/.exec(String(monster.speed || "")) || [])[1]) || null,
         creatureId: null,
         // Bundled monsters are looked up by slug; anything from Open5e has to
         // travel with the encounter or it would vanish offline.
@@ -66,13 +72,38 @@ const Encounters = (() => {
     encounter.combatants = encounter.combatants.filter((c) => c.id !== combatantId);
   }
 
+  /**
+   * Record hit points just written through the bridge, so the row shows them
+   * before TaleSpire's change event comes back round.
+   */
+  function noteBoardHp(creatureId, value, max, temp) {
+    if (!creatureId) return;
+    const prev = boardHp.get(creatureId) || {};
+    boardHp.set(creatureId, { ...prev, value, max, temp: temp ?? prev.temp ?? null });
+    render();
+  }
+
+  /** Is this combatant linked to a mini we've been told about? */
+  const isWatching = (creatureId) =>
+    Boolean(creatureId && current?.combatants.some((c) => c.creatureId === creatureId));
+
   /** Which hit points to believe, and why. */
   function hpFor(combatant) {
     const board = combatant.creatureId ? boardHp.get(combatant.creatureId) : null;
+    // Temp HP lives on the mini when the campaign has a Temp HP stat, otherwise
+    // on the combatant here; monsters have no player panel to report it.
+    const onStat = board && board.tempIndex != null;
+    const temp = onStat ? board.temp ?? 0 : combatant.temp || 0;
+    const tempFields = {
+      temp,
+      tempSource: onStat ? "stat" : "panel",
+      tempIndex: onStat ? board.tempIndex : null,
+      tempMax: onStat ? board.tempMax : null,
+    };
     if (board && board.max > 0) {
-      return { value: board.value, max: board.max, source: "board" };
+      return { value: board.value, max: board.max, source: "board", ...tempFields };
     }
-    return { value: combatant.hp, max: combatant.maxHp, source: "panel" };
+    return { value: combatant.hp, max: combatant.maxHp, source: "panel", ...tempFields };
   }
 
   function applyDamage(combatant, amount) {
@@ -131,7 +162,15 @@ const Encounters = (() => {
     boardHp = new Map();
     const names = new Map();
     for (const info of infos || []) {
-      if (info?.hp) boardHp.set(info.id, { value: info.hp.value, max: info.hp.max });
+      if (info?.hp) {
+        const v = Vitals.read(info);
+        boardHp.set(info.id, {
+          conditions: Statuses.on(info).conditions,
+          value: info.hp.value, max: info.hp.max,
+          temp: v.tempSource === "stat" ? v.temp : null,
+          tempIndex: v.tempIndex, tempMax: v.tempMax,
+        });
+      }
       if (info?.id && info.name) names.set(info.id, info.name);
     }
 
@@ -280,7 +319,8 @@ const Encounters = (() => {
     const name = el("button", "combatant-name");
     name.innerHTML =
       `<span>${escape(c.label)}</span>` +
-      `<span class="sub">${escape(c.creatureId ? "linked" : "no mini")}${c.ac != null ? ` · AC ${c.ac}` : ""}</span>`;
+      `<span class="sub">${escape(c.creatureId ? "linked" : "no mini")}${c.ac != null ? ` · AC ${c.ac}` : ""}` +
+      `${(boardHp.get(c.creatureId)?.conditions || []).map((n) => ` · <span class="cond-inline">${escape(n)}</span>`).join("")}</span>`;
     name.title = "Select — damage rolled on the board applies here";
     name.onclick = () => select(c.id);
     row.appendChild(name);
@@ -290,8 +330,9 @@ const Encounters = (() => {
       ? `<span class="party-hp-track"><span class="party-hp-fill" style="width:${share * 100}%"></span></span>`
       : "";
 
-    if (hp.source === "board") {
-      hpBox.innerHTML = `<span class="party-hp-text">${hp.value ?? "—"}${hp.max ? ` / ${hp.max}` : ""}</span>${track}`;
+    const writesBoard = Boolean(deps.canWriteBoard?.(c));
+    if (hp.source === "board" && !writesBoard) {
+      hpBox.innerHTML = `<span class="party-hp-text">${hp.value ?? "—"}${hp.max ? ` / ${hp.max}` : ""}${hp.temp > 0 ? ` +${hp.temp}` : ""}</span>${track}`;
       hpBox.title = "Hit points read from the mini on the board — change them in TaleSpire";
     } else {
       // The hit points are the control. Typing 12 sets them; typing -5 or +3
@@ -303,7 +344,9 @@ const Encounters = (() => {
       field.value = hp.value ?? "";
       field.size = 4;
       field.setAttribute("aria-label", `${c.label} hit points`);
-      field.title = "Set hit points, or type -5 / +3 to change them";
+      field.title = writesBoard
+        ? "Set hit points on the mini, or type -5 / +3 to change them"
+        : "Set hit points, or type -5 / +3 to change them";
       field.onkeydown = (ev) => {
         if (ev.key === "Enter") ev.target.blur();
         if (ev.key === "Escape") {
@@ -316,12 +359,30 @@ const Encounters = (() => {
       field.onfocus = () => field.select();
 
       const suffix = el("span", "combatant-hp-max", hp.max ? `/ ${hp.max}` : "");
+      const temp = document.createElement("input");
+      temp.type = "text";
+      temp.className = "combatant-hp-input hp-temp-input";
+      temp.value = hp.temp || "";
+      temp.placeholder = "0";
+      temp.size = 3;
+      temp.setAttribute("aria-label", `${c.label} temporary hit points`);
+      temp.title = hp.tempSource === "stat"
+        ? "Temp HP, on the mini's Temp HP stat"
+        : "Temp HP; damage typed as -5 takes it first";
+      temp.onkeydown = field.onkeydown;
+      temp.onfocus = () => temp.select();
+      temp.onchange = () => deps.onSetTemp?.(c, temp.value);
       const line = el("div", "combatant-hp-line");
       line.append(field, suffix);
+      const tempLine = el("div", "combatant-hp-line hp-temp-line");
+      tempLine.append(el("span", "hp-temp-note", "temp"), temp);
       hpBox.append(line);
       if (track) hpBox.insertAdjacentHTML("beforeend", track);
+      hpBox.append(tempLine);
     }
     row.appendChild(hpBox);
+
+    row.appendChild(turnTools(c));
 
     const controls = el("div", "combatant-controls");
 
@@ -341,6 +402,47 @@ const Encounters = (() => {
 
     row.appendChild(controls);
     return row;
+  }
+
+  /**
+   * A monster's turn tools: movement on its turn, and what lasts until its
+   * next one (a +AC like Shield, Dodge). The GM's own tracker, the same idea
+   * as a player's turn strip.
+   */
+  function turnTools(c) {
+    const box = el("div", "monster-turn");
+    const active = turnOrder().some((e) => e.active && e.combatant === c);
+    if (active) {
+      const t = c.turnState || { moved: 0, dashes: 0 };
+      const speed = (c.speed || 30) * (1 + (t.dashes || 0));
+      const move = el("span", `monster-move${t.moved > speed ? " is-over" : ""}`);
+      move.innerHTML = `<span class="badge">its turn</span> Moved <b>${t.moved || 0}</b> / ${speed} ft`;
+      box.appendChild(move);
+      for (const [label, op] of [["Dash", "dash"], ["−5", "less"], ["+5", "more"], ["reset", "reset"]]) {
+        const b = el("button", "link-btn", label);
+        b.onclick = () => deps.onMove?.(c, op);
+        box.appendChild(b);
+      }
+    }
+    const lasting = el("span", "monster-lasting");
+    const shield = el("button", `chip${c.acBonus?.amount === 5 ? " is-on" : ""}`, "Shield +5");
+    shield.title = "+5 AC until the start of its next turn";
+    shield.onclick = () => deps.onAcBonus?.(c, c.acBonus?.amount === 5 ? null : 5);
+    const custom = document.createElement("input");
+    custom.type = "number";
+    custom.className = "monster-ac-input";
+    custom.placeholder = "+AC";
+    custom.title = "A different AC bonus until its next turn; Enter to set";
+    custom.onkeydown = (ev) => {
+      if (ev.key === "Enter" && Number(custom.value)) deps.onAcBonus?.(c, Number(custom.value));
+    };
+    const dodge = el("button", `chip${c.dodge ? " is-on" : ""}`, c.dodge ? "Dodging" : "Dodge");
+    dodge.title = "Attacks against it have Disadvantage until its next turn";
+    dodge.onclick = () => deps.onDodge?.(c);
+    lasting.append(shield, custom, dodge);
+    if (c.acBonus) lasting.appendChild(el("span", "hint", `AC ${c.ac != null ? c.ac + c.acBonus.amount : `+${c.acBonus.amount}`} until its turn${c.acBonus.written ? " (on the mini)" : ""}`));
+    box.appendChild(lasting);
+    return box;
   }
 
   function renderTurnOrder(host) {
@@ -404,27 +506,53 @@ const Encounters = (() => {
     host.appendChild(list);
   }
 
+  /**
+   * Damage waiting for a target. With a combatant selected, each damage type
+   * gets Normal / Resist / Vuln / Immune, defaulting from its stat block (or a
+   * player's sheet), and the total follows (lib/damage.js).
+   */
   function renderInbox(host) {
     if (!inbox.length) return;
     const target = selected();
+    const def = target ? deps.defensesSync?.(target) : null;
 
     for (const entry of inbox) {
-      const row = el("div", "damage-offer");
-      row.appendChild(
-        el("span", "damage-offer-text", `${entry.who} rolled ${entry.amount}${entry.label ? ` — ${entry.label}` : ""}`)
-      );
-
-      const apply = el("button", "btn btn-small btn-primary", target ? `Apply to ${target.label}` : "Select a combatant");
-      apply.disabled = !target;
-      apply.onclick = () => deps.onApplyDamage(target, entry);
-      row.appendChild(apply);
-
+      const box = el("div", "damage-offer card");
+      const head = el("div", "damage-offer-head");
+      head.appendChild(el("span", "damage-offer-text", `${entry.who} rolled ${entry.amount}${entry.label ? ` · ${entry.label}` : ""}`));
       const no = el("button", "btn btn-small btn-ghost", "✕");
       no.title = "Dismiss";
       no.onclick = () => dismissDamage(entry.rollId);
-      row.appendChild(no);
+      head.appendChild(no);
+      box.appendChild(head);
 
-      host.appendChild(row);
+      const parts = entry.parts?.length ? entry.parts : [{ type: null, amount: entry.amount }];
+      entry.modes = entry.modes || {};
+      const result = Damage.apply(parts, target ? def : null, entry.modes);
+      if (target) {
+        for (const r of result.rows) {
+          const line = el("div", "damage-type-row");
+          line.appendChild(el("span", "damage-type-amount", `${r.amount} ${r.type || "untyped"}`));
+          const seg = el("span", "damage-modes");
+          for (const mode of Damage.MODES) {
+            const b = el("button", `damage-mode${r.mode === mode ? " is-on" : ""}`, { normal: "Normal", resist: "Resist", vuln: "Vuln", immune: "Immune" }[mode]);
+            b.onclick = () => {
+              entry.modes[r.type ?? ""] = mode;
+              render();
+            };
+            seg.appendChild(b);
+          }
+          line.appendChild(seg);
+          box.appendChild(line);
+        }
+        if (def?.qualified) box.appendChild(el("p", "hint", "Its stat block qualifies some defenses (nonmagical, silvered); check before applying."));
+      }
+
+      const apply = el("button", "btn btn-small btn-gold is-fill", target ? `Apply ${result.total} to ${target.label}` : "Select a combatant");
+      apply.disabled = !target;
+      apply.onclick = () => deps.onApplyDamage(target, entry, entry.modes);
+      box.appendChild(apply);
+      host.appendChild(box);
     }
   }
 
@@ -440,7 +568,14 @@ const Encounters = (() => {
 
     renderInbox(host);
 
-    host.appendChild(el("h3", "bestiary-heading", "Turn order"));
+    const orderHead = el("h3", "bestiary-heading", "Turn order");
+    if (deps.canRollInitiative?.()) {
+      const roll = el("button", "btn btn-small btn-gold", "Roll monster initiative");
+      roll.title = "Roll for every linked monster in one throw and sort them into TaleSpire's initiative";
+      roll.onclick = () => deps.onRollInitiative?.();
+      orderHead.appendChild(roll);
+    }
+    host.appendChild(orderHead);
     renderTurnOrder(host);
 
     host.appendChild(el("h3", "bestiary-heading", "Combatants"));
@@ -459,7 +594,7 @@ const Encounters = (() => {
     String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   return {
-    configure, addMonster, removeCombatant, hpFor, applyDamage,
+    configure, addMonster, removeCombatant, hpFor, applyDamage, noteBoardHp, isWatching,
     readBoard, setQueue, turnOrder, renderList, render, setCurrent,
     select, selected, offerDamage, dismissDamage,
     get current() { return current; },

@@ -15,8 +15,8 @@
  */
 
 const Store = (() => {
-  const EMPTY_LIBRARY = { version: 1, sheets: {} };
-  const EMPTY_BINDINGS = { version: 1, bindings: {}, statNamesOffered: false, encounters: {} };
+  const EMPTY_LIBRARY = { version: 1, sheets: {}, statusMap: {}, conditionMap: {}, statusNames: {} };
+  const EMPTY_BINDINGS = { version: 1, bindings: {}, statNamesOffered: false, encounters: {}, statusMap: {} };
 
   let library = null; // { version, sheets: { [sheetId]: sheet } }
   let bindings = null; // { version, bindings: { [creatureId]: sheetId } }
@@ -150,6 +150,28 @@ const Store = (() => {
     if (!library.sheets) library.sheets = {};
     if (!bindings.bindings) bindings.bindings = {};
     if (!bindings.encounters) bindings.encounters = {};
+    if (!bindings.statusMap) bindings.statusMap = {};
+    if (!library.statusMap) library.statusMap = {};
+    if (!library.statusNames) library.statusNames = {};
+    // Status ids are TaleSpire content ids, the same in every campaign, so
+    // pairings moved from campaign storage (0.15.0) to the global library.
+    // Bring any campaign pairings across once; an existing global one wins.
+    const moved = Object.entries(bindings.statusMap);
+    if (moved.length) {
+      for (const [id, c] of moved) if (!library.statusMap[id]) library.statusMap[id] = c;
+      bindings.statusMap = {};
+      await writeBlob("global", library);
+      await writeBlob("campaign", bindings);
+    }
+    // 0.23: pairings turned round, condition -> status, so several conditions
+    // can share one TaleSpire status. Carry the old status -> condition ones over.
+    if (!library.conditionMap) library.conditionMap = {};
+    const old = Object.entries(library.statusMap || {});
+    if (old.length) {
+      for (const [id, c] of old) if (c && !library.conditionMap[c]) library.conditionMap[c] = id;
+      library.statusMap = {};
+      await writeBlob("global", library);
+    }
   }
 
   // --- sheet library -------------------------------------------------------
@@ -291,9 +313,41 @@ const Store = (() => {
     await writeBlob("campaign", bindings);
   }
 
+  // --- TaleSpire statuses -> conditions ------------------------------------
+  //
+  // Condition name -> persistent emote id, chosen by the GM once and shared
+  // with players over sync (see lib/statuses.js). Status ids are TaleSpire's
+  // own content ids, identical in every campaign, so this lives in the global
+  // library and holds across campaigns. statusNames caches the names from
+  // TaleSpire's catalog (read through the bridge) for when it isn't running.
+
+  const conditionMap = () => library.conditionMap || {};
+  const statusNames = () => library.statusNames || {};
+
+  /** Condition name -> TaleSpire status id; null clears it. */
+  async function setConditionMapping(condition, emoteId) {
+    if (!library.conditionMap) library.conditionMap = {};
+    if (emoteId) library.conditionMap[condition] = emoteId;
+    else delete library.conditionMap[condition];
+    await writeBlob("global", library);
+  }
+
+  async function setStatusNames(names) {
+    const current = library.statusNames || {};
+    const same = Object.keys(names).length === Object.keys(current).length &&
+      Object.entries(names).every(([k, v]) => current[k] === v);
+    if (same) return;
+    library.statusNames = { ...names };
+    await writeBlob("global", library);
+  }
+
   return {
     load,
     persist,
+    conditionMap,
+    statusNames,
+    setConditionMapping,
+    setStatusNames,
     ensurePlay,
     listSheets,
     getSheet,

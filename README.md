@@ -129,10 +129,83 @@ The CLI and the Symbiote share one copy of the logic in `symbiote/lib/ddb.js`.
 
 ## How importing works today
 
-D&D Beyond sends no CORS headers, so the panel cannot fetch a character itself.
-Paste the link, open the JSON URL it gives you, and paste the JSON back. Nothing
-leaves your machine. A hosted adapter would remove the copy-paste step — and add a
-server, a ToS exposure, and a maintenance burden. See §03 of the feasibility doc.
+D&D Beyond sends no CORS headers, so the panel can't fetch a character itself.
+There are three ways in:
+
+- **Fetch**, with the bridge running (bridge 0.7.0 or later): paste the
+  character link into *Character link* and press *Fetch*. The plugin isn't a
+  web page, so it fetches the character and hands it to the panel. No D&D
+  Beyond login is stored or sent.
+- **Get JSON link**, with or without the bridge: the same box gives the
+  address of the character's data. Open it in your browser, copy what it shows,
+  and paste it into *Paste character JSON*.
+- **The extension** copies a character with your own signed-in session, so
+  private characters work. Paste what it copied into the same box.
+
+Fetch and Get JSON link both need the character set to Public on D&D Beyond.
+Enter in the link box fetches when the bridge is running and gives the JSON
+link when it isn't.
+
+Importing a character that's already in the library updates it in place and
+keeps its table state: current HP, spent slots and resources, conditions,
+effects and what's equipped. Only what D&D Beyond owns (level, features, spells,
+items) changes. With the bridge running, each D&D Beyond character in the
+library has a *Refresh* button, and *Refresh all* updates every one, so a GM can
+pick up the party's level-ups in one go. A private character can't be
+refreshed this way; *Refresh all* names any it skipped.
+
+Only the machine running the bridge can fetch. Players without it import with
+the extension or by hand, as before.
+
+## Layout
+
+A GM gets a row of tabs across the top of every view: their character (or
+**Characters** when none is open), **Party**, **Monsters** and **Fights**. A GM
+doesn't need a character at all: with none imported the panel opens on Party,
+and it reopens on whichever view was last open. A GM who also plays a character
+switches between it and the GM views with the same tabs. The Fights tab shows
+how many damage rolls are waiting. Players don't see the tabs.
+
+Everything above the sheet's own tabs is one compact header, so the tab you're
+on starts near the top of the panel:
+
+- Name, and whether a mini is linked (*link selected mini* / *unlink*).
+  **☰** switches characters.
+- A vitals card: AC, speed and initiative (click it to roll), and the HP bar
+  with temp HP in blue. *more* opens max HP changes, hit dice and rests.
+- A row of pills: concentration (blue, × drops it), running effects (green),
+  conditions (red, × removes; *+ Condition* adds), and the roll mode.
+- In initiative, or with a target picked, a combat card: the round, whose turn,
+  the target, this turn's movement, and Action / Bonus / Reaction.
+
+Inside the tabs: attacks are cards whose *To hit* tile rolls (damage waits for
+the hit, as always; the Damage and Crit tiles are for reading). Class features
+are rows with pips and *Use*; one with options, like Channel Divinity, opens to
+pick which on the first press. Spells are rows with *Cast* (the cheapest way
+to pay; open the row to upcast or use a pact slot), and casting opens the row
+on its rolls. Checks are tiles; proficient saves are outlined.
+
+Colours follow TaleSpire's theme where it provides them; the gold is its accent.
+
+## Recent events and undo
+
+A **Recent events** card at the bottom of the sheet lists what this panel posted
+to chat, with times: rolls and results, casts, conditions, uses, undos. Changes
+that post nothing (taking damage) are listed too. It covers this session.
+
+**↶ Undo** reverses the newest change, and again for the one before: a stack,
+so an older change is undone by undoing what came after it. Each undoable step
+keeps the sheet's state from just before it, and any board writes made along
+the way: the bridge reads a mini before writing it, so undo writes the old HP
+or temp HP back. One click is one step: a damage roll that cast Divine Smite
+gives the slot back too. The turn tracker's bookkeeping is never rewound.
+
+Covered: HP, temp HP, max HP changes, conditions (on the mini too), slots,
+casts and concentration, feature uses and pools, effects, rests, hit dice,
+damage or temp HP received, and a GM's HP and temp edits to minis (party view,
+fights, automated monster hits). Not undone: dice already rolled, and messages
+already sent to other panels (a revoked Bless isn't granted back); chat gets an
+"undid: ..." line, which says so when that applies.
 
 ## Play state
 
@@ -141,10 +214,16 @@ D&D Beyond said; everything under `sheet.play` is what has happened since —
 current HP, temp HP, spent slots, used resources, spent hit dice. It persists to
 TaleSpire's campaign storage as you play.
 
-- **HP** — *Damage* and *Heal* apply an amount to yourself. Damage eats temporary
-  hit points first.
-- **Temp HP** — *Temp HP* grants a pool. Temporary hit points don't stack, so
+- **HP** — one box under the HP bar: `-7` (or a bare `7`) is damage, `+5` is
+  healing, `=20` sets it. Damage eats temporary hit points first.
+- **Temp HP** — type the amount and press *Temp* to grant a pool. Temporary hit points don't stack, so
   granting less than you already have is refused with a note rather than applied.
+- **Max HP changes** — Aid, a wraith's Life Drain and the like change your
+  *maximum*, which is not the same as temp HP. Enter the amount (negative to
+  lower it) and a name, and press *Max HP*. A raise lifts current HP by the same
+  amount; a drop only pulls current HP down if it's now over the new maximum.
+  Each change shows as a chip with `×` to end it early, the HP readout gets an
+  asterisk and explains itself on hover, and a long rest ends them all.
 - **Spell slots** — click a slot pip to spend one, right-click to give it back.
   A multiclass caster gets a line showing how the caster level was reached, e.g.
   *"Caster level 10: Rogue (Arcane Trickster) 8 → 2, Sorcerer 8 → 8. Warlock levels
@@ -294,6 +373,24 @@ harder to trust than one that reminds you to hold Ctrl, so the reminder is
 visible and the choice stays yours: shift-click a roll for advantage, ctrl-click
 for disadvantage.
 
+### Turns
+
+While initiative runs, the bar shows the round (*Round 2 · Your turn*), and if
+the linked mini is in the queue a strip under it tracks this turn:
+
+- **Movement.** `Move 15 / 30 ft`, counted from the linked mini's moves during
+  your turn, diagonals as one square. TaleSpire reports where a mini is
+  dropped, not the path it took, so a winding route counts short: `+5`/`−5`
+  correct it. *Dash* adds your speed again; Haste doubles it; Grappled,
+  Restrained and the conditions that stop you make it 0. Going over says so in
+  red and stops nothing.
+- **Action, Bonus, Reaction.** Tap to mark one used. They come back when your
+  turn starts; the reaction shows on everyone's turns, since that's when it's
+  usually spent.
+
+The round goes up when the queue wraps back to the top. A GM adding or removing
+someone mid-round doesn't count as a new round.
+
 ## Active effects
 
 Buffs handed to you by other people — Bless, Bardic Inspiration, Shield of Faith —
@@ -318,6 +415,17 @@ bludgeoning) to `1d8+3 / +5` (Wisdom, force). Affected weapons are marked `✦` 
 the effect. Magic Weapon +1 works the same way with a flat bonus.
 
 A custom effect takes a name, a bonus like `+2` or `1d4`, and which rolls it touches.
+**How long it lasts.** Effects can run until removed, until the start or end
+of your next turn, or a number of rounds (1, 10 for a minute, 100 for ten
+minutes). They count down at turn boundaries while initiative runs, and end
+themselves with a note: concentration effects end your concentration too, and
+anything you granted is withdrawn. The presets come with sensible lengths:
+Shield until the start of your next turn, Bless, Bane, Guidance, Haste and
+Shillelagh a minute, Shield of Faith and Bardic Inspiration ten. *End of your
+next turn* cast on your own turn skips that turn's end. A granted effect counts
+on the caster's turns, not yours, so a debuff that lasts "until the start of
+Kree's next turn" ends when Kree goes. Out of initiative nothing counts down.
+
 Click an effect to suspend it, `×` to remove it. Anything marked *once* suspends
 itself after the roll that used it. Guidance isn't one of them — it runs its minute
 and the panel can't know which check you're saving the die for, so it keeps applying
@@ -348,6 +456,10 @@ Concentration is what makes granting safe: it's the mechanism that takes effects
   Haste) marks you as concentrating, shown in a bar above the effects list.
 - Casting a second concentration effect ends the first **and revokes it from everyone
   holding it** — their panels drop it with a note saying you stopped concentrating.
+- Casting a concentration spell from the Spells tab (Moonbeam, Faerie Fire) does the
+  same: the spell before it ends, its kept zone leaves the board, and chat says so.
+  Adding the effect for the spell you just cast (cast Bless, then add Bless) joins
+  that concentration instead of ending it.
 - **Drop** ends it manually. A long rest ends it too.
 
 Wire format is JSON under TaleSpire's 500-character sync cap, broadcast to `"board"`
@@ -399,6 +511,48 @@ carries it despite being a Dexterity save with no attack — so a spell that nam
 a saving throw is treated as a save spell. And healing spells put their dice in
 `damage_roll` with no `damage_types`, which is how Cure Wounds is recognised as
 healing rather than damage.
+
+## Class resources
+
+**Riders on a hit.** When a weapon attack is called a hit, the damage card lists
+what the hit could add (`lib/classfx.js`). Tap one to add its dice; the Damage
+and Crit buttons show the total, and a crit doubles the riders' dice too.
+
+- **Smite spells** you have (Divine Smite, Searing Smite, Shining Smite...), on
+  melee weapon hits, with a slot-level picker. The slot is spent, and the cast
+  announced, when you roll the damage.
+- **Hunter's Mark / Hex** while you're concentrating on it: already ticked.
+  Hunter's Mark adds to weapon hits, Hex to any attack.
+- **Sneak Attack**: half your rogue level in d6 (rounded up), on a finesse or
+  ranged weapon. Once per turn during initiative; whether you have advantage
+  or an ally beside the target is your call.
+- **Radiant Strikes / Improved Divine Smite**: +1d8 radiant on melee weapon
+  hits, ticked.
+
+Nothing is added without a tap except those last two and an active mark, which
+the rules make automatic.
+
+**Point pools.** A resource spent in amounts (Lay on Hands, Sorcery Points, or
+anything with more than eight uses) gets a number box instead of pips. Lay on
+Hands heals: with no one else targeted it heals you, otherwise it announces who.
+
+**Feature options with an area or a duration.** An option whose text names an
+area around you ("each Undead within 30 ft. of you", "a 30-foot Emanation") gets
+a Zone button, like a spell. One that runs for a while ("for 1 minute") starts a
+timed effect when used, which counts down with the turn tracker and ends itself.
+Turn Undead does both.
+
+**Effects that act every turn.** Some run for a minute and give something each
+turn: Twilight Sanctuary grants 1d6 + your cleric level as temp HP to a creature
+that ends its turn in it. The text is read for "whenever a creature ends (or
+starts) its turn" or "at the start/end of each of your turns", and the dice,
+with "plus your Cleric level" filled in. Such an effect gets a **↻** button on
+its row to roll it any time, and during initiative a prompt appears as each
+turn ends: *Twilight Sanctuary · Doran's turn ended* with *Roll 1d6+2 temp HP*
+or *Skip*. If the zone is open on the card, the prompt says whether that
+creature is inside. Temp HP rolled for you applies at once; for someone else it
+goes to their panel over sync, which keeps the larger pool (temp HP doesn't
+stack). One prompt per effect is kept: a newer turn replaces an unanswered one.
 
 ## Attacks, damage, and upcasting
 
@@ -477,8 +631,8 @@ before pressing **Pick target** in browser dev mode.
 ## GM: the party view
 
 A GM's client is given full stats on every mini, where a player sees only their
-own. The **Party** button in the header — hidden unless `players.getMoreInfo`
-reports `canGm` — opens a live read-only view built on that: name, owner, HP with
+own. The **Party** tab, shown only when `players.getMoreInfo` reports `canGm`,
+opens a live read-only view built on that: name, owner, HP with
 a bar, AC, and flying/hidden markers, with the left edge coloured as a character
 passes half and quarter health.
 
@@ -862,24 +1016,245 @@ nesting level within a file. It found a third case on its first run — a duplic
 `cantripMultiplier` in `lib/ddb.js`, harmless because the bodies were identical,
 but dead code that had been shipping for a while.
 
+## Writing to the board
+
+`plugin/` holds an optional BepInEx plugin, the bridge, that gives the panel the
+one thing the Symbiote API withholds: writing to minis. Only the GM installs it;
+changes sync to every client through TaleSpire itself, so players keep plain
+TaleSpire. See `plugin/README.md` for install, the Apple Silicon workarounds and
+the security model.
+
+When the panel finds the bridge (it checks on startup, then every 30 seconds
+while it's missing) and the client is a GM:
+
+- **Fights:** a linked combatant's HP box writes to its mini, including when the
+  mini already has hit points, which used to make the row read-only. A mini with
+  no hit points gets the statblock maximum, so the board shows a proper bar.
+  Applying damage rolled on the board goes the same way.
+- **Party:** each row's HP becomes the same box: `12` sets, `-5` / `+3` change.
+- A toast says *Bridge connected* when it's picked up.
+
+If a write fails, the panel says so and, where it was keeping its own count,
+keeps it. Without the bridge nothing changes from before. Browser dev mode fakes
+the plugin; set `window.devBridge = false` before load to see the panel without it.
+
+## Temp HP across the table
+
+Temporary hit points are their own pool everywhere, never folded into HP:
+damage takes them first, healing never touches them, a new pool replaces the
+old only if it's larger, and a long rest clears them.
+
+Where a mini's temp pool lives depends on the campaign, and the panel never
+renames stats to change that:
+
+- **The campaign has a Temp HP stat** (any of the 8 named stats called *Temp
+  HP*, *Temporary HP*, *THP*...). The stat on the mini is the truth. The GM's
+  party and fight rows read and write it through the bridge, and TaleSpire shows
+  it like any other stat.
+- **It doesn't.** The player's own panel holds the pool and reports it, with HP
+  and maximum, to the GM's panel over sync whenever it changes. A party row whose
+  player hasn't reported shows `?` rather than assuming zero. Monsters keep theirs
+  on the combatant.
+
+Each player's report also keeps the board in step: with the bridge, the GM's
+panel writes the player's HP and maximum onto their mini, so max HP changes show
+on the board too. In the other direction, a player's panel follows its linked
+mini when the board changes, but only when the board value actually moved, so a
+stale board never overwrites a change made a moment ago.
+
+GM rows get a small temp box under the HP bar, set exactly. Typing `-5` in the HP
+box is damage and takes temp first; `12` and `+3` never touch temp.
+
+## TaleSpire statuses and conditions
+
+TaleSpire's radial-menu statuses (Knocked down and the rest) are persistent
+emotes, and the symbiote API reports them only as opaque ids. The radial menu
+keeps its own list of statuses, and the bridge (0.6.1 or later) reads it, so
+every status has its name.
+
+The Party view's *Conditions → TaleSpire statuses* list has a row for every 5e
+condition, each with a picker of TaleSpire's statuses. TaleSpire has fewer
+statuses than 5e has conditions, so several conditions can share one: put
+Paralyzed and Stunned both on the same status, say. A row notes which other
+conditions share its status, and each picker option says which conditions it
+already stands for. Where a status's name matches a condition it's suggested
+(Knocked down → Prone, Asleep → Unconscious), and *Pair N suggested* takes all
+the suggestions at once. *Reload statuses* reads TaleSpire's list again, for
+when the bridge connected before a board was open. Without the bridge the
+pickers offer only statuses seen on minis, named by the minis wearing them.
+
+Status ids are TaleSpire's own content ids, the same in every campaign, so
+pairings live in the global library beside your characters and are set once for
+every campaign. Pairings from before 0.23 (each status pointing at one
+condition) are turned round on first load. The GM's panel shares them over
+sync; a player's panel asks for them when it opens.
+
+The list is folded away under its heading at the bottom of the Party view,
+with a count of how many conditions are paired; it stays open or closed as you
+left it.
+
+Once a condition is paired, it works in both directions:
+
+- **Board → panel.** A player's sheet follows the statuses on its linked mini:
+  set Knocked down from the radial menu and the sheet gains Prone, with its rules
+  text; clear it and Prone goes. Pairing a status a mini already wears counts as
+  a change too. A shared status can't say which condition it means, so the
+  sheet asks you to add whichever applies rather than guessing; clearing a
+  shared status clears every condition it stands for. The sheet only follows
+  what changed on the board, so conditions added in the panel are never wiped.
+  Party rows show each mini's conditions (a shared status as "Paralyzed or
+  Stunned") and how many statuses aren't paired yet, and fight rows show a
+  linked combatant's conditions beside its AC.
+- **Panel → board.** Adding or removing a paired condition puts the status on
+  the mini or takes it off. A shared status stays on while any of its
+  conditions does. A GM does it directly through the bridge, from their own
+  sheet or from *+ Condition* and `×` on a party row; a player's panel asks the
+  GM's bridge over sync, so it needs the GM's panel open.
+
+## Spell zones
+
+A spell with an area (D&D Beyond's "20 ft. Sphere", the SRD's shape and size, or
+"20-foot-radius Sphere" in its text) gets a *Zone* button on its card. It opens
+TaleSpire's own ruler already set to the right shape; drag it out and let go,
+and a card lists who's inside.
+
+- **Shapes.** Sphere, cylinder and emanation use the sphere ruler; cone and line
+  their own (cubes below).
+- **Cubes.** On the GM's machine with the bridge, a cube spell (Faerie Fire,
+  Thunderwave) opens TaleSpire's box ruler: drag it corner to corner. The
+  symbiote API has no box ruler, so a player's panel places a cube with the
+  sphere ruler, centre to the middle of a face, and the GM's plugin still keeps
+  it on the board as a cube.
+- **Who counts.** 5e counts a creature if any part of its space is in the area,
+  so each mini counts as a disc half its size across (one tile for Medium, two
+  for Large). Close to the grid rule, not identical.
+- **Who's checked.** On the GM's machine with the bridge: every mini on the
+  board. A GM without it: the party, linked fight minis and anything lassoed. A
+  player's panel asks the GM's panel, which checks every mini it can see and
+  answers with the names inside, leaving hidden minis out. If no GM panel
+  answers in a couple of seconds, it checks the player's own mini and anything
+  they've lassoed, and says so.
+- **Moving it.** The card follows the ruler until you close it: drag a handle
+  and let go, and the list is checked again.
+- **The ruler's size.** If the ruler is more than half a tile off the spell's
+  size, the card says so: it measures, it can't resize.
+- **Keep on board.** Leaves the area on the board as one of TaleSpire's area
+  markers, through the GM's bridge (a player's panel asks the GM's). For a
+  concentration spell it becomes your concentration, so dropping concentration,
+  or casting another concentration spell, clears it from the board. Progress
+  and any error show on the card. Move the ruler after keeping it and Keep
+  again to replace the marker. If the ruler has been put away, the GM's plugin
+  builds the marker from the shape the card last saw.
+- **Out of the way.** Keeping a zone shrinks the card to a one-line strip at
+  the bottom (*Moonbeam · 2: Aranis, Doran*) that keeps updating; tap it for
+  the full card, or × to stop tracking (the marker stays). *Minimize* does the
+  same for a zone you haven't kept. The page leaves room so nothing is hidden.
+- **While the card or strip is open** it re-checks once a second, so minis walking in or
+  out show up, and so does dragging a kept marker (TaleSpire doesn't tell
+  symbiotes about markers; the GM's bridge reads them). A player's card asks
+  the GM's panel every few seconds.
+- *Post to chat* lists who's inside, leaving hidden minis out.
+
+## The GM's monster attacks
+
+The table rolls and a person calls hit or miss, as before. The exception is the
+GM's own turn: when a monster from the Monsters view attacks a picked target
+whose AC the GM can read (an *AC* or *Armor Class* stat), the panel calls it.
+
+- A natural 1 misses and a natural 20 crits; otherwise the total against AC.
+- A hit applies the damage rolled in the same throw. A crit rolls the extra
+  damage dice first, then applies both.
+- Damage comes off temp HP first. With the bridge it's written onto the mini and
+  the player's panel follows; without it, the player's panel is told to apply it
+  (if it's open). Chat says what happened either way, e.g. *Goblin: Scimitar hits
+  Doran for 7 (3 from temp HP) → 19/23*.
+
+Attacks against a target with no readable AC work as before: the result is
+posted and a person decides.
+
+## Saving throws
+
+Ask for a save and the table runs it, ZeroGear style (`lib/saves.js`):
+
+- **Asking.** A spell with a save gets *Request DEX saves* on its card, and a
+  zone card for it gets *Ask for saves*: everyone inside is asked. Without a
+  zone, it's the lassoed minis, then the target. A monster's save action in
+  the Monsters view gets the same button.
+- **Who rolls.** Player characters (minis a player owns) get a prompt on their
+  own panel, *Save asked: Dexterity save · Fireball*, with a Roll button. The DC
+  is never sent. Monsters roll on the GM's panel, all in one throw, with their
+  stat block's save bonus.
+- **The table** lives on the GM's panel: each creature, its total, SUCCESS or
+  FAIL against the DC (which the GM can change), and ✓ / ✗ to overrule
+  (Legendary Resistance, a ruling). A player's request goes there; if no GM
+  panel answers, it runs on the player's own panel and monsters are ✓ / ✗ by
+  hand.
+- **Damage** is rolled once. *Apply* gives each creature the full amount on a
+  fail and half on a success (when the spell says half), through its own
+  resistances, onto the board where it can. It's one undoable step.
+
+## Damage types and resistances
+
+Damage keeps its types (`lib/damage.js`): a weapon's dice and each rider are
+separate groups named like `Rapier damage [piercing]` and `Divine Smite
+[radiant]`, so the GM's panel can read the types off anyone's roll. Applying
+damage in Fights, each type gets Normal / Resist / Vuln / Immune, defaulting
+from the monster's stat block (a qualified one like "nonmagical" is flagged),
+and the total follows. Players' panels report their resistances with their
+vitals, so a GM's automated monster hit halves poison against a dwarf.
+
+## Range and reach
+
+With a target picked, the target line says how far it is (squares counted the
+5e way, edge to edge), and each attack card says whether the target is in
+reach, in range, at long range (Disadvantage) or out of it. A ranged attack
+with an enemy within 5 ft warns of Disadvantage; with the GM's bridge every
+non-party mini counts, without it only the target. An open spell says whether
+the target is within its range. Measurements follow the minis as they move.
+
+## The GM's monsters, turn by turn
+
+In Fights, the monster whose turn it is shows its movement (counted from its
+mini, with Dash, −5 / +5 and reset). Any monster can take *Shield +5* (or any
++AC) or *Dodge* until its next turn; when its next turn starts they end. With
+the bridge and an AC stat on its mini, the AC change goes onto the mini, so
+players' attack rolls see it, and comes off again.
+
+## Initiative into TaleSpire
+
+TaleSpire's initiative is an order with no numbers. With the bridge (plugin
+0.6.0), *Roll initiative* on a player's sheet sends the result to the GM's
+panel, which sorts TaleSpire's order by the numbers rolled this fight
+(highest first, ties to the higher Dexterity). Fights has *Roll monster
+initiative* for every linked monster in one throw. Minis already in the order
+without a number keep their places after. The numbers are forgotten when
+initiative ends.
+
 ## Known gaps
 
 These are deliberate omissions, not bugs to trip over later:
 
-- **No HP write-back to minis.** Symbiotes cannot modify the board. The panel tracks
-  its own character's HP; it never changes anyone else's. Changing that means a
-  BepInEx plugin in C#.
+- **No HP write-back to minis without the bridge.** Symbiotes cannot modify the
+  board. With the optional bridge plugin on the GM's machine, the GM's party and
+  encounter edits do reach the minis (see §Writing to the board). A player's own
+  sheet still tracks its HP in the panel only.
 - **No stopPicking.** Once the picker is on, only the player can dismiss it
   (Esc or right-click). The panel says so but cannot do it for you.
 - **Hit/miss needs a visible AC.** A player's client can only read stats on minis
   they own, so targeting usually reports the name without a verdict. GMs see both.
-- **Monster HP can't be written to minis.** The encounter tracker keeps its own
-  count, or defers to the board when the mini already has hit points. It can
-  never push a number onto a mini.
+- **Monster HP reaches minis only through the bridge.** Without it, the encounter
+  tracker keeps its own count, or defers to the board when the mini already has
+  hit points.
 - **Initiative is roll-and-tell.** The rolled number can't be pushed into TaleSpire's
   turn tracker; the API has no writer for it.
-- **Conditions don't reach the mini.** They're panel-side only, for the same reason —
-  and TaleSpire has no condition concept on creatures to write to even if it did.
+- **Only paired conditions reach the mini.** TaleSpire has no condition concept,
+  so a condition shows on the board only through a status the GM has paired with
+  it (see §TaleSpire statuses and conditions), and only with the bridge running
+  on the GM's machine. Unpaired conditions stay in the panel. Exhaustion's level
+  doesn't travel; the status just means "exhausted".
+- **Linking a sheet takes over the mini's HP.** Once a sheet is linked, its HP,
+  maximum and temp pool are written to the mini (with the bridge), replacing
+  whatever the mini had.
 - **One character sheet, 5e only.** Pathbuilder and Demiplane would each be a new
   adapter feeding the same normalized shape.
 - **Feature-granted spells are filled from the SRD, not from D&D Beyond.** The

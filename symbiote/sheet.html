@@ -7,56 +7,62 @@
 </head>
 <body>
 
+<!-- GM only: the views a GM moves between, with or without a character open -->
+<nav id="gm-nav" class="gm-nav tabs hidden" aria-label="GM views">
+  <button id="nav-sheet" class="tab" type="button" title="Your character, or the character list">Characters</button>
+  <button id="nav-party" class="tab" type="button" title="Everyone on the board">Party</button>
+  <button id="nav-bestiary" class="tab" type="button" title="Monster stat blocks">Monsters</button>
+  <button id="nav-encounters" class="tab" type="button" title="Encounters and initiative">Fights</button>
+</nav>
+
 <!-- Import: shown until a sheet is loaded, and reachable again from the header. -->
 <section id="import-view" class="view">
   <h1>Spirekeeper</h1>
   <p class="lede">Bring a D&amp;D Beyond character into TaleSpire. <span id="app-version" class="version"></span></p>
 
-  <!-- The extension is the way in now: it reads the character with the player's
-       own D&D Beyond session, so there is no copy-paste of a JSON URL and no
-       requirement to make the character public. The manual route stays for
-       anyone who hasn't installed it, but it is no longer the headline. -->
+  <!-- One character link, two ways in: the bridge fetches it directly, or the
+       JSON link is opened in a browser and the reply pasted below. The paste
+       box also takes what the browser extension copies (private characters). -->
   <div class="import-main">
-    <label class="step-label" for="json-input">Paste what the extension copied</label>
+    <div class="import-link">
+      <label class="step-label" for="ddb-link">Character link</label>
+      <div class="row">
+        <input id="ddb-link" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
+        <button id="ddb-fetch" class="btn btn-primary hidden" title="The bridge fetches the character and imports it">Fetch</button>
+        <button id="resolve-link" class="btn" title="Get an address to open in your browser, then paste what it shows below">Get JSON link</button>
+      </div>
+      <p id="fetch-status" class="status"></p>
+      <div id="step-fetch" class="json-link hidden">
+        <div class="row">
+          <code id="json-url" class="url">—</code>
+          <button id="copy-url" class="btn" disabled>Copy</button>
+        </div>
+        <p class="hint">Open it in your browser, select all, copy, and paste it into the box below.</p>
+      </div>
+      <p class="hint">
+        The character must be set to <b>Public</b> on D&amp;D Beyond.
+        <span id="fetch-hint" class="hidden"><b>Fetch</b> imports it straight away through the bridge.</span>
+        <b>Get JSON link</b> works without the bridge.
+      </p>
+    </div>
+
+    <label class="step-label" for="json-input">Paste character JSON</label>
     <textarea id="json-input" placeholder="Paste here, or drop a .json file anywhere on this panel" spellcheck="false"></textarea>
     <div class="row">
       <button id="import-json" class="btn btn-primary">Import character</button>
       <span id="import-status" class="status"></span>
     </div>
     <p class="hint">
-      Open your character on D&amp;D Beyond, click the <b>Spirekeeper</b> toolbar button,
-      then <b>Copy</b>. Private characters work — it uses your signed-in session.
+      What the JSON link shows, or what the <b>Spirekeeper</b> browser extension copies.
+      The extension uses your signed-in D&amp;D Beyond session, so private characters work.
     </p>
   </div>
 
-  <details class="import-manual">
-    <summary>No extension? Import by hand</summary>
-    <ol class="steps">
-      <li>
-        <span class="step-label">Paste the character link</span>
-        <div class="row">
-          <input id="ddb-link" type="text" placeholder="https://www.dndbeyond.com/characters/123456789" spellcheck="false">
-          <button id="resolve-link" class="btn">Get JSON URL</button>
-        </div>
-        <p class="hint">This route needs the character set to <b>Public</b> on D&amp;D Beyond. The extension does not.</p>
-      </li>
-
-      <li id="step-fetch" class="dimmed">
-        <span class="step-label">Open that URL and copy the JSON</span>
-        <div class="row">
-          <code id="json-url" class="url">—</code>
-          <button id="copy-url" class="btn" disabled>Copy</button>
-        </div>
-        <p class="hint">
-          D&amp;D Beyond sends no CORS headers, so this panel can't fetch the URL itself.
-          Open it in your browser, select all, copy, and paste it above.
-        </p>
-      </li>
-    </ol>
-  </details>
-
   <div id="library" class="library hidden">
-    <h2>Imported characters</h2>
+    <div class="library-head">
+      <h2>Imported characters</h2>
+      <button id="library-refresh-all" class="btn btn-small hidden" title="Fetch every character from D&amp;D Beyond again, keeping HP, slots and conditions">Refresh all</button>
+    </div>
     <ul id="library-list"></ul>
     <p id="library-usage" class="hint"></p>
   </div>
@@ -64,79 +70,97 @@
 </section>
 
 <!-- Sheet -->
+<!-- Saving throws this panel is running: on every view, since a GM may be in Fights -->
+<div id="save-sessions" class="save-sessions hidden"></div>
+
 <section id="sheet-view" class="view hidden">
   <header class="sheet-header">
     <img id="avatar" class="avatar hidden" alt="">
     <div class="who">
       <h1 id="char-name">—</h1>
       <p id="char-meta">—</p>
+      <!-- Which mini this sheet speaks for; the button links or unlinks -->
+      <div id="bind-bar" class="bind-bar">
+        <span id="bind-status">No mini linked</span>
+        <button id="bind-btn" class="link-btn">Link selected mini</button>
+      </div>
     </div>
-    <button id="open-party" class="btn btn-ghost hidden" title="GM: party overview">Party</button>
-    <button id="open-bestiary" class="btn btn-ghost hidden" title="GM: monsters">Monsters</button>
-    <button id="open-encounters" class="btn btn-ghost hidden" title="GM: encounters and initiative">Fights</button>
-    <button id="open-library" class="btn btn-ghost" title="Switch or import a character">☰</button>
+    <button id="open-library" class="icon-btn" title="Switch or import a character">☰</button>
   </header>
 
-  <div id="bind-bar" class="bind-bar">
-    <span id="bind-status">No mini linked</span>
-    <button id="bind-btn" class="btn btn-small">Link selected mini</button>
-  </div>
-
-  <div class="vitals">
-    <div class="vital"><span class="vital-label">AC</span><span id="v-ac" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">HP</span><span id="v-hp" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Init</span><span id="v-init" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Speed</span><span id="v-speed" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Pass. Per</span><span id="v-pp" class="vital-value">—</span></div>
-    <div class="vital"><span class="vital-label">Prof</span><span id="v-prof" class="vital-value">—</span></div>
-  </div>
-
-  <div class="hp-bar">
-    <input id="hp-amount" type="number" min="0" value="1" aria-label="Amount of damage or healing">
-    <button id="hp-damage" class="btn btn-small">Damage</button>
-    <button id="hp-heal" class="btn btn-small">Heal</button>
-    <input id="hp-temp-amount" type="number" min="0" value="0" aria-label="Temporary hit points to grant">
-    <button id="hp-temp-add" class="btn btn-small">Temp HP</button>
-  </div>
-
-  <div class="hp-bar">
-    <button id="rest-short" class="btn btn-small btn-ghost">Short rest</button>
-    <button id="rest-long" class="btn btn-small btn-ghost">Long rest</button>
-  </div>
-
-  <div id="hit-dice" class="hit-dice"></div>
-
-  <!-- Targeting is global state, so the control lives above the tabs: a target
-       picked here applies to a spell attack just as much as a weapon swing. -->
-  <div class="target-bar">
-    <button id="pick-target" class="btn btn-small">Pick target</button>
-    <span id="target-status" class="status">No target</span>
-    <button id="clear-target" class="btn btn-small btn-ghost hidden">Clear</button>
-  </div>
-
-  <div class="init-bar">
-    <button id="roll-initiative" class="btn btn-small btn-primary">Roll initiative</button>
-    <span id="init-queue" class="status">Not in initiative</span>
-  </div>
-
-  <div class="conditions-block">
-    <div id="conditions" class="conditions"></div>
-    <div class="condition-add">
-      <select id="condition-pick" aria-label="Add a condition"></select>
-      <button id="condition-add" class="btn btn-small">Add</button>
+  <!-- AC, speed, initiative and HP in one card. The HP box takes -7 (damage),
+       +5 (healing) or =20 (set); "more" holds the rarer HP business. -->
+  <div class="vitals-card card">
+    <div class="tile"><span class="tile-label">AC</span><span id="v-ac" class="tile-value">—</span></div>
+    <div class="tile"><span class="tile-label">SPD</span><span id="v-speed" class="tile-value">—</span></div>
+    <button id="roll-initiative" class="tile tile-btn" title="Roll initiative"><span class="tile-label">INIT</span><span id="v-init" class="tile-value">—</span></button>
+    <div class="hp-block">
+      <div class="hp-label"><span>HP</span><span id="v-temp" class="hp-temp"></span></div>
+      <div class="hp-row">
+        <div class="hp-meter" aria-hidden="true"><i id="hp-fill"></i><i id="hp-temp-fill" class="is-temp"></i></div>
+        <span id="v-hp" class="hp-num">—</span>
+      </div>
+      <div class="hp-input-row">
+        <input id="hp-input" type="text" inputmode="numeric" placeholder="−7 / +5 / =20" aria-label="Change HP: -7 for damage, +5 for healing, =20 to set" spellcheck="false">
+        <button id="hp-temp-btn" class="btn btn-small" title="Set temporary HP to the number in the box">Temp</button>
+        <button id="hp-more" class="link-btn" aria-expanded="false" aria-controls="hp-drawer">more</button>
+      </div>
     </div>
-    <p id="condition-preview" class="hint"></p>
-    <ul id="condition-effects" class="condition-effects"></ul>
   </div>
 
-  <!-- Roll mode applies to the next roll. Shift/Ctrl-click a roll button is the shortcut. -->
-  <div class="mode-bar" role="radiogroup" aria-label="Roll mode">
-    <button class="mode-btn is-active" data-mode="normal" role="radio" aria-checked="true">Normal</button>
-    <button class="mode-btn" data-mode="advantage" role="radio" aria-checked="false">Advantage</button>
-    <button class="mode-btn" data-mode="disadvantage" role="radio" aria-checked="false">Disadvantage</button>
+  <div id="hp-drawer" class="hp-drawer card hidden">
+    <!-- Changes to maximum HP (Aid, a wraith's Life Drain). Not temp HP: these
+         move the maximum itself, and all of them end on a long rest. -->
+    <div class="drawer-row">
+      <span class="drawer-label">Max HP</span>
+      <input id="maxhp-amount" type="number" value="5" aria-label="Change to maximum hit points, negative to lower it">
+      <input id="maxhp-name" class="maxhp-name" type="text" placeholder="Aid, Life Drain…" aria-label="What changed your maximum hit points" spellcheck="false">
+      <button id="maxhp-add" class="btn btn-small" title="Raise (or, with a negative number, lower) your maximum HP until a long rest">Add</button>
+    </div>
+    <div id="maxhp-mods" class="maxhp-mods"></div>
+    <div class="drawer-row"><span class="drawer-label">Hit dice</span><div id="hit-dice" class="hit-dice"></div></div>
+    <div class="drawer-row">
+      <span class="drawer-label">Rest</span>
+      <button id="rest-short" class="btn btn-small btn-ghost">Short rest</button>
+      <button id="rest-long" class="btn btn-small btn-ghost">Long rest</button>
+    </div>
   </div>
-  <p class="hint mode-hint">Pick a mode above; it stays until you change it. Shift-click and Ctrl-click also work where the host passes modifier keys through.</p>
+
+  <!-- Concentration, buffs and conditions as pills, then the roll mode.
+       Shift/Ctrl-click a roll button is the shortcut for the mode. -->
+  <div class="pill-row">
+    <span id="concentration" class="pill pill-conc hidden"><span id="conc-label"></span><button id="conc-drop" class="chip-btn" title="Drop concentration">×</button></span>
+    <span id="effect-pills" class="pill-group"></span>
+    <span id="conditions" class="pill-group"></span>
+    <select id="condition-pick" class="pill pill-add" aria-label="Add a condition"></select>
+    <button id="condition-add" class="hidden">Add</button>
+    <button id="pick-target-pill" class="pill pill-add hidden" title="Pick a target on the board">◎ Target</button>
+    <div class="mode-bar" role="radiogroup" aria-label="Roll mode" title="Applies to every roll until you change it. Shift-click and Ctrl-click a roll also work where the host passes modifier keys through.">
+      <button class="mode-btn is-active" data-mode="normal" role="radio" aria-checked="true">Normal</button>
+      <button class="mode-btn" data-mode="advantage" role="radio" aria-checked="false">Adv</button>
+      <button class="mode-btn" data-mode="disadvantage" role="radio" aria-checked="false">Dis</button>
+    </div>
+  </div>
+  <!-- What the conditions do to you, one short line each -->
+  <ul id="condition-effects" class="condition-effects"></ul>
+  <p id="condition-preview" class="hidden"></p>
+
+  <!-- In initiative, or with a target picked: whose turn, the target, and this turn's movement and actions -->
+  <div id="combat-card" class="combat-card card hidden">
+    <div class="combat-head">
+      <span id="init-queue" class="combat-turn">Not in initiative</span>
+      <span class="combat-target">
+        <button id="pick-target" class="link-btn">Pick target</button>
+        <span id="target-status" class="status hidden">No target</span>
+        <button id="clear-target" class="chip-btn hidden" title="Clear the target">×</button>
+      </span>
+    </div>
+    <div id="turn-bar" class="turn-bar hidden" aria-label="This turn"></div>
+  </div>
+
   <div id="staged-roll" class="staged-roll hidden"></div>
+  <div id="save-prompts" class="save-prompts hidden"></div>
+  <div id="turn-prompts" class="turn-prompts hidden"></div>
   <div id="pending-damage" class="pending hidden"></div>
   <div id="effect-inbox" class="inbox"></div>
 
@@ -151,17 +175,17 @@
 
   <div id="tab-actions" class="tab-panel" role="tabpanel">
 
-    <div id="concentration" class="concentration hidden">
-      <span id="conc-label"></span>
-      <button id="conc-drop" class="btn btn-small btn-ghost">Drop</button>
-    </div>
-
+    <div id="attacks"></div>
+    <div id="resources"></div>
     <section class="effects">
       <div class="effects-head">
         <h2>Active effects</h2>
-        <button id="effect-custom-toggle" class="btn btn-small btn-ghost">Custom…</button>
+        <button id="effect-add-toggle" class="link-btn" aria-expanded="false" aria-controls="effect-add">+ Add</button>
       </div>
+      <div id="effect-list" class="effect-list"></div>
+      <div id="effect-add" class="effect-add card hidden">
       <div id="effect-presets" class="effect-presets"></div>
+      <button id="effect-custom-toggle" class="link-btn">Custom effect…</button>
       <form id="effect-custom" class="effect-custom hidden">
         <input id="effect-name" type="text" placeholder="Name, e.g. Bardic Inspiration" spellcheck="false">
         <input id="effect-bonus" type="text" placeholder="+2 or 1d4" spellcheck="false">
@@ -173,6 +197,16 @@
           <label><input type="checkbox" value="ac"> AC</label>
           <label><input id="effect-once" type="checkbox"> Once only</label>
         </div>
+        <label class="effect-lasts">Lasts
+          <select id="effect-lasts">
+            <option value="">Until removed</option>
+            <option value="start1">Until the start of my next turn</option>
+            <option value="end1">Until the end of my next turn</option>
+            <option value="r1">1 round</option>
+            <option value="r10">1 minute (10 rounds)</option>
+            <option value="r100">10 minutes (100 rounds)</option>
+          </select>
+        </label>
         <button type="submit" class="btn btn-small btn-primary">Add effect</button>
       </form>
       <div id="weapon-pick-panel" class="grant-panel hidden">
@@ -182,8 +216,7 @@
           <button id="weapon-pick-cancel" class="btn btn-small btn-ghost">Cancel</button>
         </div>
       </div>
-
-      <div id="effect-list" class="effect-list"></div>
+      </div>
 
       <!-- Inline rather than a <dialog>: a modal is awkward in a 400px sidebar,
            and this avoids depending on dialog close-event behaviour we can't
@@ -199,8 +232,6 @@
       </div>
     </section>
 
-    <div id="attacks"></div>
-    <div id="resources"></div>
   </div>
 
   <div id="tab-spells" class="tab-panel hidden" role="tabpanel">
@@ -210,11 +241,15 @@
   </div>
 
   <div id="tab-checks" class="tab-panel hidden" role="tabpanel">
+    <div class="stat-strip">
+      <div class="card stat-mini"><span>Proficiency</span><b id="v-prof">—</b></div>
+      <div class="card stat-mini"><span>Passive Perception</span><b id="v-pp">—</b></div>
+    </div>
+    <h2>Ability checks</h2>
+    <div id="abilities" class="grid-rolls"></div>
     <h2>Saving throws</h2>
     <div id="saves" class="grid-rolls"></div>
     <p id="saves-note" class="hint"></p>
-    <h2>Abilities</h2>
-    <div id="abilities" class="grid-rolls"></div>
     <h2>Skills</h2>
     <div id="skills" class="grid-rolls"></div>
   </div>
@@ -257,9 +292,15 @@
       <p id="party-meta">—</p>
     </div>
     <button id="party-refresh" class="btn btn-ghost" title="Re-read the board">↻</button>
-    <button id="close-party" class="btn btn-ghost" title="Back to the sheet">✕</button>
   </header>
   <div id="party-list" class="party-list"></div>
+
+  <!-- GM: pair each 5e condition with one of TaleSpire's radial-menu statuses,
+       once. Set up and then rarely touched, so it stays folded away. -->
+  <details id="status-map-box" class="status-map-box">
+    <summary><span>Conditions → TaleSpire statuses</span><span id="status-map-count" class="sub"></span></summary>
+    <div id="status-map" class="status-map"></div>
+  </details>
 </section>
 
 <!-- GM: monsters. The SRD set ships with the mod; Open5e is opt-in because it
@@ -271,7 +312,6 @@
       <p id="bestiary-speaker">Rolls post from you</p>
     </div>
     <button id="bestiary-speak" class="btn btn-ghost" title="Post rolls as a mini on the board">Speak as…</button>
-    <button id="close-bestiary" class="btn btn-ghost" title="Back">✕</button>
   </header>
 
   <div class="row bestiary-search">
@@ -298,7 +338,6 @@
       <h1>Fights</h1>
       <p id="encounters-meta">—</p>
     </div>
-    <button id="close-encounters" class="btn btn-ghost" title="Back">✕</button>
   </header>
 
   <div class="row">
@@ -311,11 +350,33 @@
   <div id="encounter-detail" class="encounter-detail"></div>
 </section>
 
+<!-- Who is inside a spell's area; shown over whichever view is open -->
+<div id="zone-card" class="zone-card hidden" role="dialog" aria-label="Spell zone"></div>
+
 <div id="toast" class="toast hidden"></div>
 <div id="drop-overlay" class="drop-overlay hidden">Drop a character JSON file</div>
 
+<!-- Recent events, with undo for the last change (see History in app.js) -->
+<section id="event-log" class="event-log hidden" aria-label="Recent events">
+  <div class="event-head">
+    <h2>Recent events</h2>
+    <button id="event-undo" class="btn btn-small btn-gold" disabled>↶ Undo</button>
+    <button id="event-toggle" class="link-btn">▾ hide</button>
+  </div>
+  <ol id="event-list" class="event-list"></ol>
+</section>
+
 <script src="lib/ddb.js"></script>
+<script src="lib/damage.js"></script>
+<script src="lib/saves.js"></script>
+<script src="lib/range.js"></script>
 <script src="lib/board.js"></script>
+<script src="lib/bridge.js"></script>
+<script src="lib/vitals.js"></script>
+<script src="lib/statuses.js"></script>
+<script src="lib/zones.js"></script>
+<script src="lib/turns.js"></script>
+<script src="lib/classfx.js"></script>
 <script src="lib/store.js"></script>
 <script src="lib/rolls.js"></script>
 <script src="lib/party.js"></script>

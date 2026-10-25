@@ -479,6 +479,7 @@ const Bestiary = (() => {
             name: `${monster.name}: ${action.name}`,
             roll: action.roll,
             damage: action.damage,
+            damageType: action.damageType,
             kind: "attack",
           },
           ev
@@ -488,14 +489,25 @@ const Bestiary = (() => {
     }
 
     if (action.kind === "save") {
-      buttons.appendChild(el("span", "hint", `DC ${action.saveDc} ${action.saveAbility}`));
+      const ask = el("button", "btn btn-small btn-primary", `Request ${String(action.saveAbility || "").slice(0, 3).toUpperCase()} saves (DC ${action.saveDc})`);
+      ask.title = "Ask the lassoed (or targeted) creatures for this save; players never see the DC";
+      ask.onclick = () =>
+        deps.onRequestSave?.({
+          name: `${monster.name}: ${action.name}`,
+          ability: action.saveAbility,
+          dc: action.saveDc,
+          damage: action.damage,
+          damageType: action.damageType,
+          half: /half as much damage|half damage/i.test(action.desc || ""),
+        });
+      buttons.appendChild(ask);
     }
 
     if (action.damage && action.kind !== "attack") {
       const b = el("button", "btn btn-small", `Damage ${action.damage}`);
       b.onclick = (ev) =>
         deps.onRoll(
-          { name: `${monster.name}: ${action.name}`, damage: action.damage, damageName: `${action.name} damage`, kind: "damage" },
+          { name: `${monster.name}: ${action.name}`, damage: action.damage, damageName: `${action.name} damage`, damageType: action.damageType, kind: "damage" },
           ev
         );
       buttons.appendChild(b);

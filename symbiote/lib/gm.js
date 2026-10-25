@@ -7,16 +7,18 @@
  * returns full stats on every mini to a GM, where a player sees only their own —
  * so this is a live read-only view of the party.
  *
- * Read-only is not a design choice, it's the API: a Symbiote cannot write hit
- * points, move a mini, or set a condition. What it can do is watch, and
- * `creatures.onCreatureStateChange` fires on every HP change, so the board stays
- * the source of truth and this panel just reflects it.
+ * A Symbiote cannot write hit points, move a mini, or set a condition. What it
+ * can do is watch, and `creatures.onCreatureStateChange` fires on every HP
+ * change, so the board stays the source of truth and this panel reflects it.
+ *
+ * The exception is the bridge plugin (lib/bridge.js): when the GM's TaleSpire
+ * runs it, each row's hit points become an input that writes to the mini.
  */
 
 const GM = (() => {
   const failed = (r) => r && r.cause !== undefined;
 
-  let deps = {};        // { container, onError }
+  let deps = {};        // { container, meta, onError, canWrite, onSetHp, onSetTemp, onCondition, conditionNames, afterRender }
   let watching = [];    // creature ids we care about
   let rows = [];        // last known info, in display order
   let owners = new Map(); // playerId -> name
@@ -70,19 +72,36 @@ const GM = (() => {
       const stats = info.stats || [];
       const ac = stats.find((s) => /^ac$|armou?r/i.test(s.name || ""));
       const hp = info.hp || {};
+      // Temp HP from a campaign stat, else as reported by the player's panel
+      const v = Vitals.read(info);
+      const tempStat = Vitals.tempStatOf(info);
       return {
         id: info.id,
         name: info.name || "Unnamed",
         hp: Number.isFinite(hp.value) ? hp.value : null,
         hpMax: Number.isFinite(hp.max) ? hp.max : null,
+        temp: v.temp,
+        tempSource: v.tempSource,
+        tempIndex: v.tempIndex,
+        tempMax: v.tempMax,
         ac: ac && Number.isFinite(ac.value) ? ac.value : null,
         flying: Boolean(info.isFlying),
         hidden: Boolean(info.isExplicitlyHidden),
         emotes: (info.idsOfActivePersistentEmotes || []).length,
+        // TaleSpire statuses the GM has paired with conditions, and any not yet paired
+        ...(() => {
+          const st = Statuses.on(info);
+          return {
+            conditions: st.conditions,
+            shared: st.shared,
+            unknownStatuses: st.unknown.length,
+            unknownNames: st.unknown.map((id) => Statuses.nameOf(id)).filter(Boolean),
+          };
+        })(),
         owner: (info.ownerIds || []).map((o) => owners.get(o)).filter(Boolean)[0] || null,
         // Other named stats, so a campaign that tracks e.g. Stress still shows it.
         extras: stats
-          .filter((s) => s !== ac && s.name && Number.isFinite(s.value))
+          .filter((s) => s !== ac && s.name && Number.isFinite(s.value) && !Vitals.TEMP_NAME.test(s.name))
           .map((s) => `${s.name} ${s.value}`),
       };
     });
@@ -140,10 +159,62 @@ const GM = (() => {
     hp.className = "party-hp";
     if (row.hp == null) {
       hp.innerHTML = `<span class="party-hp-text">HP hidden</span>`;
+    } else if (deps.canWrite?.()) {
+      // Same control as an encounter row: 12 sets, -5 / +3 change
+      const pct = row.hpMax ? Math.max(0, Math.min(100, (row.hp / row.hpMax) * 100)) : 0;
+      const field = document.createElement("input");
+      field.type = "text";
+      field.className = "combatant-hp-input";
+      field.value = row.hp;
+      field.size = 4;
+      field.setAttribute("aria-label", `${row.name} hit points`);
+      field.title = "Set hit points on the mini, or type -5 / +3 to change them";
+      field.onkeydown = (ev) => {
+        if (ev.key === "Enter") ev.target.blur();
+        if (ev.key === "Escape") {
+          ev.target.value = row.hp;
+          ev.target.blur();
+        }
+      };
+      field.onfocus = () => field.select();
+      field.onchange = () => deps.onSetHp?.(row, field.value);
+      const line = document.createElement("div");
+      line.className = "combatant-hp-line";
+      const max = document.createElement("span");
+      max.className = "combatant-hp-max";
+      max.textContent = row.hpMax ? `/ ${row.hpMax}` : "";
+      // Temp HP: its own box, set exactly. Damage typed as -5 above takes it first.
+      const temp = document.createElement("input");
+      temp.type = "text";
+      temp.className = "combatant-hp-input hp-temp-input";
+      temp.value = row.temp ?? "";
+      temp.placeholder = row.temp == null ? "?" : "0";
+      temp.size = 3;
+      temp.setAttribute("aria-label", `${row.name} temporary hit points`);
+      temp.title = row.tempSource === "stat"
+        ? "Temp HP, from the campaign's Temp HP stat"
+        : row.tempSource === "panel"
+          ? "Temp HP, as reported by the player's panel"
+          : "Temp HP unknown: no Temp HP stat in this campaign and the player's panel hasn't reported";
+      temp.onkeydown = field.onkeydown;
+      temp.onfocus = () => temp.select();
+      temp.onchange = () => deps.onSetTemp?.(row, temp.value);
+      const tempLabel = document.createElement("span");
+      tempLabel.className = "hp-temp-note";
+      tempLabel.textContent = "temp";
+      line.append(field, max);
+      const tempLine = document.createElement("div");
+      tempLine.className = "combatant-hp-line hp-temp-line";
+      tempLine.append(tempLabel, temp);
+      hp.append(line);
+      hp.insertAdjacentHTML("beforeend",
+        `<span class="party-hp-track"><span class="party-hp-fill" style="width:${pct}%"></span></span>`);
+      hp.append(tempLine);
     } else {
       const pct = row.hpMax ? Math.max(0, Math.min(100, (row.hp / row.hpMax) * 100)) : 0;
+      const tempText = row.temp > 0 ? ` +${row.temp}` : "";
       hp.innerHTML =
-        `<span class="party-hp-text">${row.hp}${row.hpMax ? ` / ${row.hpMax}` : ""}</span>` +
+        `<span class="party-hp-text">${row.hp}${row.hpMax ? ` / ${row.hpMax}` : ""}${tempText}</span>` +
         `<span class="party-hp-track"><span class="party-hp-fill" style="width:${pct}%"></span></span>`;
     }
 
@@ -153,6 +224,85 @@ const GM = (() => {
     if (row.extras.length) ac.title = row.extras.join("\n");
 
     el.append(name, hp, ac);
+
+    // Conditions, from the statuses on the mini
+    const writable = Boolean(deps.canWrite?.());
+    const addable = writable ? (deps.conditionNames?.() || []).filter((n) => !row.conditions.includes(n)) : [];
+    if (row.conditions.length || row.shared?.length || row.unknownStatuses || addable.length) {
+      const conds = document.createElement("div");
+      conds.className = "party-conds";
+      for (const c of row.conditions) {
+        const chip = document.createElement("span");
+        chip.className = "condition";
+        const label = document.createElement("span");
+        label.textContent = c;
+        chip.appendChild(label);
+        if (writable) {
+          const x = document.createElement("button");
+          x.className = "chip-btn";
+          x.textContent = "×";
+          x.title = `Clear ${c} from the mini`;
+          x.onclick = () => deps.onCondition?.(row, c, false);
+          chip.appendChild(x);
+        }
+        conds.appendChild(chip);
+      }
+      // A status several conditions share: the board can't say which one
+      for (const sh of row.shared || []) {
+        const chip = document.createElement("span");
+        chip.className = "condition";
+        const label = document.createElement("span");
+        label.textContent = sh.conditions.join(" or ");
+        chip.appendChild(label);
+        chip.title = `TaleSpire status: ${sh.name}`;
+        if (writable) {
+          const x = document.createElement("button");
+          x.className = "chip-btn";
+          x.textContent = "×";
+          x.title = `Clear ${sh.name} from the mini`;
+          x.onclick = () => deps.onCondition?.(row, sh.conditions[0], false);
+          chip.appendChild(x);
+        }
+        conds.appendChild(chip);
+      }
+      // Statuses not paired with a condition yet: by name where the catalog
+      // knows it, otherwise counted
+      for (const n of row.unknownNames) {
+        const chip = document.createElement("span");
+        chip.className = "condition status-unknown";
+        chip.textContent = `${n} (not paired)`;
+        chip.title = "Pair it with a condition in the list below";
+        conds.appendChild(chip);
+      }
+      const unnamed = row.unknownStatuses - row.unknownNames.length;
+      if (unnamed > 0) {
+        const chip = document.createElement("span");
+        chip.className = "condition status-unknown";
+        chip.textContent = unnamed === 1 ? "1 unpaired status" : `${unnamed} unpaired statuses`;
+        chip.title = "Pair it with a condition in the list below";
+        conds.appendChild(chip);
+      }
+      if (addable.length) {
+        const pick = document.createElement("select");
+        pick.className = "party-cond-pick";
+        pick.setAttribute("aria-label", `Add a condition to ${row.name}`);
+        const first = document.createElement("option");
+        first.value = "";
+        first.textContent = "+ Condition";
+        pick.appendChild(first);
+        for (const n of addable) {
+          const opt = document.createElement("option");
+          opt.value = n;
+          opt.textContent = n;
+          pick.appendChild(opt);
+        }
+        pick.onchange = () => {
+          if (pick.value) deps.onCondition?.(row, pick.value, true);
+        };
+        conds.appendChild(pick);
+      }
+      el.appendChild(conds);
+    }
     return el;
   }
 
@@ -188,6 +338,7 @@ const GM = (() => {
     }
 
     for (const row of rows) host.appendChild(rowElement(row));
+    deps.afterRender?.();
   }
 
   const escape = (s) =>

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bridge probe</title>
+<style>
+  body { margin: 0; padding: 12px; font: 13px/1.4 system-ui, sans-serif;
+         background: var(--ts-background-primary, #1b1d22); color: var(--ts-color-primary, #e6e6e6); }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+  button, input { font: inherit; padding: 4px 8px; border-radius: 4px; border: 1px solid #555;
+                  background: #2a2d34; color: inherit; }
+  input { width: 64px; }
+  .ok { color: #7bd88f; } .bad { color: #ff7b72; } .dim { opacity: .65; }
+  pre { background: #111317; padding: 8px; border-radius: 4px; max-height: 260px; overflow: auto;
+        white-space: pre-wrap; word-break: break-word; font-size: 11px; }
+</style>
+</head>
+<body>
+<h1>Spirekeeper bridge probe</h1>
+
+<div class="row">Bridge: <span id="bridge" class="dim">checking…</span>
+  <button id="ping">Ping</button></div>
+
+<div class="row"><button id="use">Use selected mini</button>
+  <span id="mini" class="dim">no mini</span></div>
+
+<div class="row">HP <input id="hp" type="number"> / <input id="max" type="number">
+  <button id="set">Set via bridge</button>
+  <button id="dmg">−5</button><button id="heal">+5</button></div>
+
+<div class="row"><button id="clear">Clear log</button></div>
+<pre id="log"></pre>
+
+<script>
+const BRIDGE = "http://127.0.0.1:47817";
+const $ = (id) => document.getElementById(id);
+let creatureId = null;
+
+function log(...parts) {
+  const line = `${new Date().toLocaleTimeString()}  ${parts.map((p) =>
+    typeof p === "string" ? p : JSON.stringify(p)).join(" ")}`;
+  $("log").textContent = line + "\n" + $("log").textContent;
+}
+
+async function bridge(path, method = "GET") {
+  const res = await fetch(BRIDGE + path, { method });
+  return res.json();
+}
+
+async function ping() {
+  try {
+    const r = await bridge("/ping");
+    const who = await bridge("/whoami");
+    $("bridge").className = "ok";
+    $("bridge").textContent = `connected (v${r.version}, ${who.canGm ? "GM" : "player"})`;
+    log("ping", r, who);
+  } catch (e) {
+    $("bridge").className = "bad";
+    $("bridge").textContent = "not reachable: " + e.message;
+    log("ping failed", String(e));
+  }
+}
+
+// Read the mini both ways: through TaleSpire's own symbiote API, and through
+// the plugin. They should agree.
+async function readMini() {
+  if (!creatureId) return;
+  const ts = await TS.creatures.getMoreInfo([{ id: creatureId }]);
+  const info = Array.isArray(ts) ? ts[0] : null;
+  let viaBridge = null;
+  try { viaBridge = await bridge(`/creature?id=${encodeURIComponent(creatureId)}`); }
+  catch (e) { log("bridge read failed", String(e)); }
+  if (info) {
+    $("mini").className = "";
+    $("mini").textContent = `${info.name}: ${info.hp?.value}/${info.hp?.max}`;
+    $("hp").value = info.hp?.value ?? "";
+    $("max").value = info.hp?.max ?? "";
+  }
+  log("read", { ts: info && { name: info.name, hp: info.hp, emotes: info.idsOfActivePersistentEmotes }, bridge: viaBridge });
+}
+
+async function useSelected() {
+  const sel = await TS.creatures.getSelectedCreatures();
+  if (!Array.isArray(sel) || !sel.length) return log("select a mini first");
+  creatureId = sel[0].id;
+  await readMini();
+}
+
+async function setHp(value, max) {
+  if (!creatureId) return log("pick a mini first");
+  const q = `id=${encodeURIComponent(creatureId)}&value=${value}` + (max !== "" ? `&max=${max}` : "");
+  try { log("set", await bridge(`/hp?${q}`, "POST")); }
+  catch (e) { log("set failed", String(e)); }
+}
+
+$("ping").onclick = ping;
+$("use").onclick = useSelected;
+$("set").onclick = () => setHp($("hp").value, $("max").value);
+$("dmg").onclick = () => setHp(Number($("hp").value || 0) - 5, $("max").value);
+$("heal").onclick = () => setHp(Number($("hp").value || 0) + 5, $("max").value);
+$("clear").onclick = () => { $("log").textContent = ""; };
+
+// TaleSpire calls these by name, as declared in manifest.json
+function onCreatureStateChange(event) {
+  if (event?.payload?.id !== creatureId) return;
+  log("event", event.kind, event.payload);
+  readMini();
+}
+function onCreatureSelectionChange() {}
+
+log("origin", location.origin || location.href);
+ping();
+</script>
+</body>
+</html>

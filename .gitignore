@@ -15,3 +15,14 @@ symbiote/_devsample.json
 
 .DS_Store
 node_modules/
+
+# TaleSpire's own assemblies, copied locally to compile the plugin against.
+# They are Bouncyrock's files and must never be committed.
+plugin/refs/
+# Downloaded build tools and plugin build output
+plugin/.tools/
+plugin/bin/
+plugin/obj/
+plugin/dist/
+plugin/tools/*/bin/
+plugin/tools/*/obj/
