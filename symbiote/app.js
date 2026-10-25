@@ -171,7 +171,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.27.0";
+  const APP_VERSION = "0.27.1";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -382,16 +382,21 @@ const App = (() => {
     // reliably when initiative first starts. Polling while this view is open
     // means the order appears whether or not an event came.
     clearInterval(initiativePoll);
-    initiativePoll = setInterval(refreshInitiative, 3000);
+    initiativePoll = setInterval(pollTurns, 3000);
   }
 
   function renderEncounters() {
     Encounters.renderList(Store.listEncounters());
     Encounters.render();
+    renderEncounterMeta();
+  }
+
+  /** The Fights header: the open encounter, and which mode TaleSpire is in. */
+  function renderEncounterMeta() {
     const open = Encounters.current;
-    $("encounters-meta").textContent = open
-      ? `${open.name} · ${open.combatants.length} combatants`
-      : `${Store.listEncounters().length} saved`;
+    const parts = [open ? `${open.name} · ${open.combatants.length} combatants` : `${Store.listEncounters().length} saved`];
+    if (state.boardMode) parts.push(MODE_TEXT[state.boardMode] || state.boardMode);
+    $("encounters-meta").textContent = parts.join(" · ");
   }
 
   async function saveCurrentEncounter() {
@@ -4071,7 +4076,38 @@ const App = (() => {
    * the encounter tracker never received a queue unless an `initiativeUpdated`
    * event happened to arrive. One function now feeds both.
    */
+  /**
+   * Keeping the turn order current while Fights is open. TaleSpire's
+   * initiative event does most of the work; this covers initiative starting,
+   * which doesn't always send one. With the bridge it asks which of TaleSpire's
+   * modes the board is in (cheap, draws nothing) and only reads the turn order
+   * in turn-based mode. Without it: every 3 s while a turn is active, every
+   * 15 s otherwise. Either way the fight only redraws when the order changed.
+   */
+  let lastQueue = null;
+  let lastPollAt = 0;
+  async function pollTurns() {
+    const mode = Bridge.status.available ? await Bridge.mode() : null;
+    if (mode !== state.boardMode) {
+      const leftCombat = state.boardMode === "turn-based";
+      state.boardMode = mode;
+      renderEncounterMeta();
+      if (leftCombat) await refreshInitiative(); // clear the order once
+    }
+    if (mode) {
+      if (mode === "turn-based") await refreshInitiative();
+      return;
+    }
+    const idle = !lastQueue?.items?.length || !(lastQueue.activeItemIndex >= 0);
+    if (idle && Date.now() - lastPollAt < 15000) return;
+    lastPollAt = Date.now();
+    await refreshInitiative();
+  }
+
+  const MODE_TEXT = { exploration: "Exploration mode", "turn-based": "Initiative mode", cutscene: "Cutscene mode" };
+
   async function refreshInitiative() {
+    lastPollAt = Date.now();
     let queue = null;
     try {
       const result = await TS.initiative.getQueue();
@@ -4081,6 +4117,7 @@ const App = (() => {
       console.warn("[Spirekeeper] getQueue threw:", e.message);
     }
 
+    lastQueue = queue;
     renderInitiative(queue);
     Encounters.setQueue(queue);
     return queue;
@@ -6163,6 +6200,7 @@ const App = (() => {
       onRemove: removeCombatant,
       onApplyDamage: applyOfferedDamage,
       canRollInitiative: () => Bridge.canWrite(),
+      modeText: () => (state.boardMode && state.boardMode !== "turn-based" ? MODE_TEXT[state.boardMode] : null),
       onRollInitiative: () => rollMonsterInitiative(),
       onMove: (c, op) => {
         const t = (c.turnState ||= { moved: 0, dashes: 0, lastPos: null });
@@ -6701,6 +6739,7 @@ document.addEventListener("DOMContentLoaded", () => {
           window.devZones = (window.devZones || []).filter((z) => z.id !== params.id);
           return { ok: true };
         }
+        if (path === "/mode") return { ok: true, mode: window.devMode || "turn-based", id: 1 };
         if (path === "/ddb") {
           // The sample character for any id; 404 and 403 stand for missing and private
           if (params.id === "404") return { ok: true, status: 404, character: { success: false, message: "Character not found" } };

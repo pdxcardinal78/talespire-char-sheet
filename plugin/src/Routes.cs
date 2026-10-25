@@ -25,7 +25,7 @@ namespace Spirekeeper.Bridge
             bool isWrite = path == "/hp" || path == "/stat" || path == "/emote" || path == "/zone" || path == "/zone-remove" || path == "/ruler" || path == "/initiative-set" || path == "/initiative-current";
             switch (path)
             {
-                case "/whoami": case "/selected": case "/creature": case "/statuses": case "/creatures": case "/zone-info": case "/ruler-info": case "/ruler": case "/initiative": case "/initiative-set": case "/initiative-current":
+                case "/whoami": case "/mode": case "/selected": case "/creature": case "/statuses": case "/creatures": case "/zone-info": case "/ruler-info": case "/ruler": case "/initiative": case "/initiative-set": case "/initiative-current":
                 case "/hp": case "/stat": case "/emote": case "/zone": case "/zone-remove":
                     break;
                 default:
@@ -57,6 +57,7 @@ namespace Spirekeeper.Bridge
                     case "/selected": return Selected();
                     case "/creature": return Creature(q["id"]);
                     case "/statuses": return StatusCatalog();
+                    case "/mode": return Mode();
                     case "/creatures": return AllCreatures();
                     case "/zone-info": return ZoneInfo(q["id"]);
                     case "/ruler-info": return RulerInfo(q["id"]);
@@ -148,6 +149,17 @@ namespace Spirekeeper.Bridge
             }
             sb.Append(']');
             return Json.Ok("\"creatures\":" + sb);
+        }
+
+        // Which of TaleSpire's three play modes the board is in: exploration
+        // (internally FreeRoam), turn-based ("Initiative Mode") or cutscene.
+        // The symbiote API has no way to ask; the panel uses it to leave the
+        // turn order alone outside initiative.
+        static string Mode()
+        {
+            byte id = PlayMode.CurrentStateId;
+            string name = id == PlayMode.Ids.TurnBased ? "turn-based" : id == PlayMode.Ids.Cutscene ? "cutscene" : "exploration";
+            return Json.Ok($"\"mode\":\"{name}\",\"id\":{id}");
         }
 
         // TaleSpire's statuses, as the mini's radial menu lists them. The menu

@@ -193,8 +193,14 @@ const Encounters = (() => {
     return changed;
   }
 
+  // The turn order is polled every few seconds; redraw only when it changed,
+  // or typing in the fight (a search, an HP box) is interrupted for nothing
+  let queueSig = null;
   function setQueue(q) {
     queue = q || null;
+    const sig = JSON.stringify(q ? [q.activeItemIndex, (q.items || []).map((i) => [i.id, i.name])] : null);
+    if (sig === queueSig) return;
+    queueSig = sig;
     render();
   }
 
@@ -503,8 +509,9 @@ const Encounters = (() => {
   function renderTurnOrder(host) {
     const order = turnOrder();
     if (!order.length) {
+      const mode = deps.modeText?.();
       host.appendChild(
-        el("p", "hint", "Not in initiative. Start it in TaleSpire and the order appears here.")
+        el("p", "hint", `${mode ? `${mode}: not` : "Not"} in initiative. Start it in TaleSpire and the order appears here.`)
       );
       return;
     }
@@ -614,9 +621,25 @@ const Encounters = (() => {
   function render() {
     const host = deps.detail;
     if (!host) return;
+    // Moving an element drops its focus, so remember where the cursor was in
+    // the parts that survive a redraw (the monster search, a stat block form)
+    const active = document.activeElement;
+    const keep = active && [deps.addPanel, deps.sheet].some((n) => n && n.contains(active)) ? active : null;
+    const caret = keep && typeof keep.selectionStart === "number" ? [keep.selectionStart, keep.selectionEnd] : null;
     // Park the shared parts before clearing, so they're never detached
     if (deps.home) for (const n of [deps.addPanel, deps.sheet]) if (n) deps.home.appendChild(n);
     host.replaceChildren();
+    try {
+      draw(host);
+    } finally {
+      if (keep && keep.isConnected && document.activeElement !== keep) {
+        keep.focus({ preventScroll: true });
+        if (caret) try { keep.setSelectionRange(caret[0], caret[1]); } catch { /* not a text field */ }
+      }
+    }
+  }
+
+  function draw(host) {
     if (!current) return;
 
     const head = el("div", "encounter-head");

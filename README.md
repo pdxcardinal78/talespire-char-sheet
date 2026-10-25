@@ -798,6 +798,15 @@ takes changes — they just last until the panel closes, and the panel says so.
 
 ## GM: encounters and initiative
 
+While Fights is open the turn order stays current without redrawing for
+nothing. With the bridge (0.7.1 or later), the panel asks which of TaleSpire's
+three modes the board is in, shows it in the Fights header (Exploration,
+Initiative or Cutscene mode), and reads the turn order only in initiative
+mode. Without the bridge it relies on TaleSpire's initiative event, checking
+every 3 seconds while a turn is active and every 15 seconds otherwise. The
+fight redraws only when the order actually changes, and a redraw keeps the
+cursor where it was (typing in the monster search, say).
+
 **Fights** holds prepared encounters, saved by name in campaign storage, so both
 of the evening's fights can sit ready and be called up when the party walks into
 them. Adding a monster three times makes three combatants rather than one with a

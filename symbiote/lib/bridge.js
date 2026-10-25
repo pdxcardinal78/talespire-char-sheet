@@ -187,6 +187,20 @@ const Bridge = (() => {
     }
   }
 
+  /**
+   * TaleSpire's play mode: "exploration", "turn-based" or "cutscene", or null
+   * when the bridge can't say (not running, or older than 0.7.1).
+   */
+  async function mode() {
+    if (!status.available) return null;
+    try {
+      const r = await transport("GET", "/mode");
+      return r?.ok ? r.mode || null : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Every mini on the board with position and size, for spell zones. GM's machine only. */
   async function creatures() {
     if (!status.available) return null;
@@ -289,7 +303,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, ddbCharacter, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, initiative, setInitiative, onChange, useTransport,
+    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, ddbCharacter, mode, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, initiative, setInitiative, onChange, useTransport,
     get status() { return status; },
   };
 })();
