@@ -29,6 +29,10 @@ const Bestiary = (() => {
     deps = d;
   }
 
+  // Rolls and announcements from a combatant go out as its mini, when linked
+  const roll = (spec, ev) => deps.onRoll({ ...spec, speakerId: ctx?.speakerId || null }, ev);
+  const announce = (text) => deps.onAnnounce?.(text, ctx?.speakerId || null);
+
   const el = (tag, cls, text) => {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -65,13 +69,22 @@ const Bestiary = (() => {
     }
 
     for (const row of rows) {
+      const line = el("div", "bestiary-result");
       const item = el("button", "bestiary-row");
       item.innerHTML =
         `<span class="bestiary-name">${escape(row.name)}</span>` +
         `<span class="sub">${escape([row.meta, row.source].filter(Boolean).join(" · "))}</span>` +
         `<span class="bestiary-cr">CR ${escape(row.cr ?? "—")}</span>`;
+      item.title = "Show its stat block";
       item.onclick = () => open(row);
-      host.appendChild(item);
+      line.appendChild(item);
+      if (deps.onAdd) {
+        const add = el("button", "btn btn-small btn-primary", "Add");
+        add.title = "Add to this encounter";
+        add.onclick = () => deps.onAdd(row);
+        line.appendChild(add);
+      }
+      host.appendChild(line);
     }
   }
 
@@ -86,6 +99,7 @@ const Bestiary = (() => {
       ctx = deps.scratchContext?.(current) || null;
       await resolveSpells();
       renderSheet();
+      deps.onPreview?.(current, row);
     } catch (e) {
       deps.onError?.(e.message);
     }
@@ -224,6 +238,7 @@ const Bestiary = (() => {
 
     const base = spell.override;
     form.append(
+      field("Name", "name", base.name, spell.baseName || spell.name),
       field("Dice", "dice", base.dice, spell.dice),
       field("Damage type", "damageType", base.damageType, spell.damageType),
       field("Save DC", "saveDc", base.saveDc, block.saveDc, "number"),
@@ -241,7 +256,7 @@ const Bestiary = (() => {
     reset.title = "Put this spell back the way the statblock prints it";
     reset.onclick = () => {
       editing = null;
-      applyOverride(spell, { dice: null, damageType: null, saveDc: null, toHit: null });
+      applyOverride(spell, { name: null, dice: null, damageType: null, saveDc: null, toHit: null });
     };
     row.appendChild(reset);
 
@@ -266,6 +281,7 @@ const Bestiary = (() => {
       const number = (v) => (String(v).trim() === "" ? null : Number(v));
       editing = null;
       applyOverride(spell, {
+        name: String(data.get("name")).trim() || null,
         dice: String(data.get("dice")).trim() || null,
         damageType: String(data.get("damageType")).trim() || null,
         saveDc: number(data.get("saveDc")),
@@ -276,7 +292,11 @@ const Bestiary = (() => {
     return form;
   }
 
-  function spellElement(monster, block, blockIndex, group, spell) {
+  function spellElement(monster, block, blockIndex, group, rawSpell) {
+    // A renamed spell (the cultist's Frostball) keeps its record underneath
+    const spell = rawSpell.override?.name
+      ? { ...rawSpell, baseName: rawSpell.name, name: rawSpell.override.name }
+      : rawSpell;
     const wrap = el("div", `monster-spell${spell.edited ? " is-edited" : ""}`);
 
     const head = el("div", "monster-spell-head");
@@ -299,12 +319,12 @@ const Bestiary = (() => {
     wrap.appendChild(head);
 
     const buttons = el("div", "bestiary-action-buttons");
-    const label = `${monster.name}: ${spell.name}`;
+    const label = `${who(monster)}: ${spell.name}`;
 
     if (spell.requiresAttackRoll && spell.toHit != null) {
       const b = el("button", "btn btn-small btn-primary", `Attack ${Monsters.signed(spell.toHit)}`);
       b.onclick = (ev) =>
-        deps.onRoll({ name: label, roll: `d20${Monsters.signed(spell.toHit)}`, damage: spell.dice, kind: "attack" }, ev);
+        roll({ name: label, roll: `d20${Monsters.signed(spell.toHit)}`, damage: spell.dice, damageType: spell.damageType || null, kind: "attack" }, ev);
       buttons.appendChild(b);
     }
 
@@ -315,11 +335,13 @@ const Bestiary = (() => {
     if (spell.dice && !spell.requiresAttackRoll) {
       const b = el("button", "btn btn-small", `${spell.heals ? "Heal" : "Damage"} ${spell.dice}`);
       b.onclick = (ev) =>
-        deps.onRoll(
+        roll(
           {
             name: label,
             damage: spell.dice,
-            damageName: `${spell.name}${spell.damageType ? ` ${spell.damageType}` : ""}`,
+            // The type goes on the dice group as "[cold]", so not in the name too
+            damageName: spell.heals || !spell.damageType ? `${spell.name}${spell.damageType ? ` ${spell.damageType}` : ""}` : spell.name,
+            damageType: spell.heals ? null : spell.damageType || null,
             kind: spell.heals ? "healing" : "damage",
           },
           ev
@@ -338,7 +360,7 @@ const Bestiary = (() => {
     cast.title = cap == null ? "Announce the cast" : "Spend one and announce the cast";
     cast.onclick = () => {
       if (cap != null && !spend(blockIndex, group, spell, 1)) return;
-      deps.onAnnounce?.(`${monster.name} casts ${spell.name}`);
+      announce(`${who(monster)} casts ${spell.name}`);
       renderSheet();
     };
     buttons.appendChild(cast);
@@ -439,10 +461,133 @@ const Bestiary = (() => {
       row.appendChild(box);
     };
     add("AC", String(monster.ac ?? "—"));
-    add("HP", String(monster.hp ?? "—"));
+    add(ctx?.hp ? "Max HP" : "HP", String(ctx?.hp ? ctx.hp.max ?? "—" : monster.hp ?? "—"));
     add("CR", String(monster.cr ?? "—"));
     return row;
   }
+
+  /**
+   * This combatant's maximum hit points: the printed average, the most its hit
+   * dice allow, a fresh roll, or any number. Damage already taken carries over.
+   */
+  function hpControls(monster) {
+    if (!ctx?.hp) return null;
+    const o = Monsters.hpOptions(monster);
+    const box = el("div", "monster-hp-pick");
+    box.appendChild(el("span", "spell-edit-label", `Max HP${o.formula ? ` (${o.formula})` : ""}`));
+    const opt = (label, value, title) => {
+      const b = el("button", `chip${ctx.hp.max === value ? " is-on" : ""}`, label);
+      b.title = title;
+      b.onclick = () => ctx.hp.set(typeof value === "function" ? value() : value);
+      box.appendChild(b);
+    };
+    opt(`Avg ${o.average ?? "—"}`, o.average, "The printed average");
+    if (o.formula) {
+      opt(`Max ${o.max}`, o.max, "Every hit die at its highest");
+      opt("Roll", o.roll, `Roll ${o.formula}`);
+    }
+    const custom = document.createElement("input");
+    custom.type = "number";
+    custom.min = "1";
+    custom.className = "monster-ac-input";
+    custom.placeholder = "any";
+    custom.title = "Any maximum; Enter to set";
+    custom.onkeydown = (ev) => {
+      if (ev.key === "Enter" && Number(custom.value) > 0) ctx.hp.set(Math.round(Number(custom.value)));
+    };
+    box.appendChild(custom);
+    return box;
+  }
+
+  // --- changing an action for this fight ------------------------------------
+  //
+  // Same idea as a spell's changes: a scimitar that bites with cold, a bite
+  // that hits harder. Kept with the encounter's spell changes under
+  // "action:<name>", so they apply to every one of this monster in the fight.
+
+  let editingAction = null;
+  const actionKey = (action) => `action:${action.name}`;
+
+  /** An action with this fight's changes laid over it. */
+  function effectiveAction(action) {
+    const o = overrides()[actionKey(action)];
+    if (!o) return action;
+    const toHit = o.toHit ?? action.toHit;
+    return {
+      ...action,
+      name: o.name || action.name,
+      baseName: action.name,
+      toHit,
+      roll: o.toHit != null ? `d20${Monsters.signed(toHit)}` : action.roll,
+      damage: o.damage || action.damage,
+      damageType: o.damageType || action.damageType,
+      saveDc: o.saveDc ?? action.saveDc,
+      edited: true,
+    };
+  }
+
+  function actionForm(base, shown) {
+    const form = el("form", "spell-edit");
+    const o = overrides()[actionKey(base)] || {};
+    const field = (label, name, value, placeholder, type = "text") => {
+      const wrap = el("label", "spell-edit-field");
+      wrap.appendChild(el("span", "spell-edit-label", label));
+      const input = document.createElement("input");
+      input.type = type;
+      input.name = name;
+      input.value = value ?? "";
+      input.placeholder = placeholder == null ? "—" : String(placeholder);
+      input.className = "spell-edit-input";
+      wrap.appendChild(input);
+      return wrap;
+    };
+    form.appendChild(field("Name", "name", o.name, base.name));
+    if (base.kind === "attack") form.appendChild(field("To hit", "toHit", o.toHit, base.toHit, "number"));
+    if (base.kind === "save") form.appendChild(field("Save DC", "saveDc", o.saveDc, base.saveDc, "number"));
+    if (base.damage) {
+      form.appendChild(field("Damage", "damage", o.damage, base.damage));
+      form.appendChild(field("Damage type", "damageType", o.damageType, base.damageType));
+    }
+    const row = el("div", "spell-edit-buttons");
+    const save = el("button", "btn btn-small btn-primary", "Apply");
+    save.type = "submit";
+    const reset = el("button", "btn btn-small btn-ghost", "Reset");
+    reset.type = "button";
+    reset.disabled = !shown.edited;
+    reset.title = "Put it back the way the stat block prints it";
+    reset.onclick = () => {
+      editingAction = null;
+      delete overrides()[actionKey(base)];
+      ctx?.onChange?.();
+      renderSheet();
+    };
+    const cancel = el("button", "btn btn-small btn-ghost", "Cancel");
+    cancel.type = "button";
+    cancel.onclick = () => {
+      editingAction = null;
+      renderSheet();
+    };
+    row.append(save, reset, cancel);
+    form.appendChild(row);
+    if (!ctx?.persists) form.appendChild(el("p", "hint", "This monster isn't in an encounter, so changes last until the panel closes."));
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      const data = new FormData(form);
+      const text = (k) => (data.has(k) ? String(data.get(k)).trim() || null : null);
+      const num = (k) => (data.has(k) && String(data.get(k)).trim() !== "" ? Number(data.get(k)) : null);
+      const next = { name: text("name"), toHit: num("toHit"), saveDc: num("saveDc"), damage: text("damage"), damageType: text("damageType")?.toLowerCase() || null };
+      for (const k of Object.keys(next)) if (next[k] == null) delete next[k];
+      if (Object.keys(next).length) overrides()[actionKey(base)] = next;
+      else delete overrides()[actionKey(base)];
+      editingAction = null;
+      ctx?.onChange?.();
+      renderSheet();
+    };
+    return form;
+  }
+
+  /** The name rolls go out under: the combatant's label when it has one. */
+  const who = (monster) => ctx?.label || monster.name;
 
   function abilityRow(monster) {
     const row = el("div", "bestiary-abilities");
@@ -454,18 +599,20 @@ const Bestiary = (() => {
         `<span class="ability-save">save ${Monsters.signed(ab.save)}${ab.saveProficient ? "●" : ""}</span>`;
       box.title = `Roll a ${ab.name} saving throw`;
       box.onclick = (ev) =>
-        deps.onRoll({ name: `${monster.name}: ${ab.name} save`, roll: `d20${Monsters.signed(ab.save)}`, kind: "save" }, ev);
+        roll({ name: `${who(monster)}: ${ab.name} save`, roll: `d20${Monsters.signed(ab.save)}`, kind: "save" }, ev);
       row.appendChild(box);
     }
     return row;
   }
 
-  function actionElement(monster, action) {
-    const wrap = el("div", "bestiary-action");
+  function actionElement(monster, base) {
+    const action = effectiveAction(base);
+    const wrap = el("div", `bestiary-action${action.edited ? " is-edited" : ""}`);
 
     const head = el("div", "bestiary-action-head");
     const name = el("span", "bestiary-action-name", action.name);
     head.appendChild(name);
+    if (action.edited) head.appendChild(el("span", "tag", "edited"));
     if (action.category !== "action") head.appendChild(el("span", "tag", action.category));
     wrap.appendChild(head);
 
@@ -474,9 +621,9 @@ const Bestiary = (() => {
     if (action.kind === "attack") {
       const b = el("button", "btn btn-small btn-primary", `Attack ${Monsters.signed(action.toHit)}`);
       b.onclick = (ev) =>
-        deps.onRoll(
+        roll(
           {
-            name: `${monster.name}: ${action.name}`,
+            name: `${who(monster)}: ${action.name}`,
             roll: action.roll,
             damage: action.damage,
             damageType: action.damageType,
@@ -493,7 +640,7 @@ const Bestiary = (() => {
       ask.title = "Ask the lassoed (or targeted) creatures for this save; players never see the DC";
       ask.onclick = () =>
         deps.onRequestSave?.({
-          name: `${monster.name}: ${action.name}`,
+          name: `${who(monster)}: ${action.name}`,
           ability: action.saveAbility,
           dc: action.saveDc,
           damage: action.damage,
@@ -506,14 +653,29 @@ const Bestiary = (() => {
     if (action.damage && action.kind !== "attack") {
       const b = el("button", "btn btn-small", `Damage ${action.damage}`);
       b.onclick = (ev) =>
-        deps.onRoll(
-          { name: `${monster.name}: ${action.name}`, damage: action.damage, damageName: `${action.name} damage`, damageType: action.damageType, kind: "damage" },
+        roll(
+          { name: `${who(monster)}: ${action.name}`, damage: action.damage, damageName: `${action.name} damage`, damageType: action.damageType, kind: "damage" },
           ev
         );
       buttons.appendChild(b);
     }
 
+    if (action.kind === "attack" || action.kind === "save" || action.damage) {
+      const edit = el("button", "btn btn-small btn-ghost", "✎");
+      edit.title = "Change this for this fight: name, to hit, damage, damage type";
+      edit.onclick = () => {
+        editingAction = editingAction === base.name ? null : base.name;
+        renderSheet();
+      };
+      buttons.appendChild(edit);
+    }
+    if (action.kind === "attack" || action.damage) {
+      const tag = [action.damage, action.damageType].filter(Boolean).join(" ");
+      if (tag) buttons.appendChild(el("span", "hint", tag));
+    }
+
     if (buttons.childElementCount) wrap.appendChild(buttons);
+    if (editingAction === base.name) wrap.appendChild(actionForm(base, action));
     if (action.desc) wrap.appendChild(el("p", "bestiary-desc", action.desc));
     return wrap;
   }
@@ -525,9 +687,11 @@ const Bestiary = (() => {
     if (!current) return;
 
     const m = current;
-    host.appendChild(el("h2", "bestiary-title", m.name));
+    host.appendChild(el("h2", "bestiary-title", ctx?.label && ctx.label !== m.name ? `${ctx.label} (${m.name})` : m.name));
     host.appendChild(el("p", "bestiary-meta", [m.meta, m.acNote].filter(Boolean).join(" · ")));
     host.appendChild(statRow(m));
+    const hpPick = hpControls(m);
+    if (hpPick) host.appendChild(hpPick);
 
     const lines = [
       m.hitDice ? `Hit dice ${m.hitDice}` : null,
@@ -549,7 +713,7 @@ const Bestiary = (() => {
       for (const s of m.skills) {
         const b = el("button", "btn btn-small", `${s.name} ${Monsters.signed(s.value)}`);
         b.onclick = (ev) =>
-          deps.onRoll({ name: `${m.name}: ${s.name}`, roll: `d20${Monsters.signed(s.value)}`, kind: "check" }, ev);
+          roll({ name: `${who(m)}: ${s.name}`, roll: `d20${Monsters.signed(s.value)}`, kind: "check" }, ev);
         skills.appendChild(b);
       }
       host.appendChild(skills);
@@ -591,11 +755,12 @@ const Bestiary = (() => {
   async function show(monster, context = null) {
     current = monster;
     ctx = context;
+    editingAction = null;
     await resolveSpells();
     renderSheet();
   }
 
-  return { configure, runSearch, setOnline, renderSheet, show, get current() { return current; } };
+  return { configure, runSearch, setOnline, renderSheet, show, effectiveAction, get current() { return current; }, get context() { return ctx; } };
 })();
 
 if (typeof window !== "undefined") window.Bestiary = Bestiary;

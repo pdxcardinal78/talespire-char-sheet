@@ -111,7 +111,8 @@ const App = (() => {
       let lastView = null;
       try { lastView = localStorage.getItem("sheetbridge:view"); } catch {}
       if (hasLast) openSheet(last);
-      const gmViews = { party: showParty, bestiary: showBestiary, encounters: showEncounters };
+      // "bestiary" was the Monsters view, now part of Fights
+      const gmViews = { party: showParty, bestiary: showEncounters, encounters: showEncounters };
       if (state.isGM && gmViews[lastView]) gmViews[lastView]();
       else if (state.isGM && !hasLast) showParty();
       else if (!hasLast) showImport();
@@ -168,7 +169,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.25.1";
+  const APP_VERSION = "0.26.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -370,6 +371,7 @@ const App = (() => {
 
   function showEncounters() {
     showView("encounters");
+    if (!$("bestiary-results").childElementCount) Bestiary.runSearch("");
     renderEncounters();
     refreshBoardHp();
     refreshInitiative();
@@ -388,7 +390,6 @@ const App = (() => {
     $("encounters-meta").textContent = open
       ? `${open.name} · ${open.combatants.length} combatants`
       : `${Store.listEncounters().length} saved`;
-    refreshEncounterPicker();
   }
 
   async function saveCurrentEncounter() {
@@ -426,37 +427,84 @@ const App = (() => {
     else Encounters.render();
   }
 
-  /** The encounter a monster gets added to, chosen on the Monsters view. */
-  function refreshEncounterPicker() {
-    const pick = $("bestiary-encounter");
-    const chosen = pick.value;
-    pick.replaceChildren();
-    for (const enc of Store.listEncounters()) {
-      const opt = document.createElement("option");
-      opt.value = enc.id;
-      opt.textContent = enc.name;
-      pick.appendChild(opt);
+  /**
+   * Add a monster from the search to the open encounter: as many as asked,
+   * each with average, max or rolled hit points.
+   */
+  async function addMonsterRow(row) {
+    const enc = Encounters.current;
+    if (!enc) return toast("Open or create an encounter first.", true);
+    if (!enc.combatants) enc.combatants = [];
+    try {
+      const monster = row.raw ? Monsters.normalize(row.raw) : await Monsters.get(row.slug);
+      if (!monster) throw new Error("That monster could not be loaded.");
+      const count = Math.max(1, Math.min(20, Number($("bestiary-count").value) || 1));
+      const mode = $("monster-hp-mode").value || "average";
+      // Bundled monsters are re-read from the shipped file by slug; an Open5e one
+      // has to carry its statblock or it would be missing next session.
+      const bundled = await Monsters.get(monster.slug);
+      Encounters.addMonster(enc, { ...monster, bundled: Boolean(bundled) }, count, mode);
+      await saveCurrentEncounter();
+      const added = enc.combatants.slice(-count).map((c) => c.maxHp).join(", ");
+      toast(`${count} × ${monster.name} added (HP ${added}).`);
+    } catch (e) {
+      toast(e.message, true);
     }
-    if ([...pick.options].some((o) => o.value === chosen)) pick.value = chosen;
-    $("bestiary-add").classList.toggle("hidden", !pick.options.length || !Bestiary.current);
   }
 
-  async function addCurrentMonsterToEncounter() {
-    const monster = Bestiary.current;
-    const enc = Store.getEncounter($("bestiary-encounter").value);
-    if (!monster || !enc) return;
-    if (!enc.combatants) enc.combatants = [];
+  /**
+   * Change a combatant's maximum hit points. Damage already taken carries
+   * over: a goblin 3 down from 7 is 3 down from 12 at max. On a linked mini the
+   * board gets the new numbers when the bridge can write them.
+   */
+  async function setCombatantMaxHp(combatant, max) {
+    const newMax = Math.max(1, Math.round(Number(max) || 0));
+    if (!newMax) return;
+    const hp = Encounters.hpFor(combatant);
+    const oldMax = hp.max ?? combatant.maxHp ?? newMax;
+    const taken = Math.max(0, oldMax - (hp.value ?? oldMax));
+    const next = Math.max(0, newMax - taken);
+    if (hp.source === "board" || (combatant.creatureId && writesBoard(combatant))) {
+      if (!writesBoard(combatant)) {
+        return toast("This mini's hit points live on the board. Change them in TaleSpire, or run the bridge.", true);
+      }
+      const v = { id: combatant.creatureId, hp: hp.value, max: hp.max, temp: hp.temp, tempIndex: hp.tempIndex, tempMax: hp.tempMax };
+      const r = await Vitals.write(v, { hp: next, max: newMax, temp: hp.temp || 0 });
+      if (!r.ok) return toast(`Couldn't set ${combatant.label}'s HP on the board (${r.error}).`, true);
+      Encounters.noteBoardHp(combatant.creatureId, next, newMax, hp.tempIndex != null ? hp.temp : null);
+    }
+    combatant.maxHp = newMax;
+    combatant.hp = next;
+    combatant.hpMode = "custom";
+    await saveCurrentEncounter();
+    Bestiary.renderSheet();
+    toast(`${combatant.label}: ${next} / ${newMax} HP.`);
+  }
 
-    const count = Math.max(1, Math.min(20, Number($("bestiary-count").value) || 1));
-    // Bundled monsters are re-read from the shipped file by slug; an Open5e one
-    // has to carry its statblock or it would be missing next session.
-    const bundled = await Monsters.get(monster.slug);
-    Encounters.addMonster(enc, { ...monster, bundled: Boolean(bundled) }, count);
-
-    await Store.saveEncounter(enc);
-    if (Encounters.current?.id === enc.id) Encounters.setCurrent(enc);
-    toast(`${count} × ${monster.name} added to ${enc.name}.`);
-    renderEncounters();
+  /**
+   * A condition on a monster. Kept on the combatant; on a linked mini, a
+   * condition paired with a TaleSpire status is set on the board too (and a
+   * shared status stays while another of its conditions does).
+   */
+  async function setMonsterCondition(c, name, on) {
+    c.conditions = (c.conditions || []).filter((n) => n !== name);
+    if (on) c.conditions.push(name);
+    const emote = Statuses.emoteFor(name);
+    if (c.creatureId && emote && Bridge.canWrite()) {
+      const sharedHeld = !on && Statuses.conditionsFor(emote).some((x) => x !== name && Encounters.conditionsOf(c).includes(x) && c.conditions.includes(x));
+      if (!sharedHeld) {
+        const r = await Bridge.setEmote(c.creatureId, emote, on);
+        if (!r.ok) toast(`Couldn't ${on ? "set" : "clear"} ${name} on ${c.label}'s mini (${r.error}).`, true);
+      }
+    }
+    if (on) {
+      const monster = c.cached || (await Monsters.get(c.slug).catch(() => null));
+      if (new RegExp(`\\b${name}\\b`, "i").test(monster?.defenses?.conditionImmune || "")) {
+        toast(`${c.label}'s stat block says it's immune to ${name}. Added anyway.`, true);
+      }
+    }
+    await saveCurrentEncounter();
+    await refreshBoardHp();
   }
 
   /**
@@ -787,11 +835,13 @@ const App = (() => {
   }
 
   /** Open a combatant's statblock, from the encounter or the turn order. */
-  async function openCombatantStatblock(combatant) {
+  async function openCombatantStatblock(combatant, { scroll = false } = {}) {
     const monster = combatant.cached || (await Monsters.get(combatant.slug));
     if (!monster) return toast("That statblock is no longer available.", true);
     await Bestiary.show(monster, combatantSpellContext(combatant));
-    showBestiary();
+    if (currentView !== "encounters") showView("encounters");
+    Encounters.expand(combatant.id);
+    if (scroll) $("bestiary-sheet").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   /**
@@ -811,6 +861,12 @@ const App = (() => {
     return {
       label: combatant.label,
       persists: true,
+      // Its rolls go out as its mini, when linked
+      speakerId: combatant.creatureId || null,
+      hp: {
+        get max() { return Encounters.hpFor(combatant).max ?? combatant.maxHp; },
+        set: (n) => setCombatantMaxHp(combatant, n),
+      },
       state: {
         uses: (combatant.spellUses ||= {}),
         overrides: (tweaks[combatant.slug] ||= {}),
@@ -840,8 +896,7 @@ const App = (() => {
    * of the fight.
    */
   function showBestiary() {
-    showView("bestiary");
-    if (!$("bestiary-results").childElementCount) Bestiary.runSearch("");
+    showEncounters();
   }
 
   /**
@@ -853,6 +908,7 @@ const App = (() => {
    * the two never get confused.
    */
   function renderSpeaker() {
+    if (!$("bestiary-speaker")) return;
     $("bestiary-speaker").textContent = state.speaker
       ? `Rolls post as ${state.speaker.name}`
       : "Rolls post from you";
@@ -882,7 +938,7 @@ const App = (() => {
         // monster + damageExpr let a GM's attack against a target with a known
         // AC resolve itself; see resolveMonsterAttack
         context: {
-          kind: spec.kind, creatureId: state.speaker?.id || null, target: state.target,
+          kind: spec.kind, creatureId: spec.speakerId || state.speaker?.id || null, target: state.target,
           monster: true, damageExpr: spec.damage || null, damageType: spec.damageType || null, source: spec.name,
         },
       });
@@ -893,9 +949,9 @@ const App = (() => {
   }
 
   /** A monster saying what it just did, in its own voice where there is one. */
-  async function monsterAnnounce(text) {
+  async function monsterAnnounce(text, speakerId = null) {
     try {
-      await postChat(Rolls.bold(text), state.speaker?.id || null);
+      await postChat(Rolls.bold(text), speakerId || state.speaker?.id || null);
     } catch (e) {
       toast(e.message, true);
     }
@@ -916,7 +972,7 @@ const App = (() => {
    * and the GM's Party, Monsters and Fights. One at a time; the choice is
    * remembered so a GM's panel reopens where it was.
    */
-  const VIEWS = ["import", "sheet", "party", "bestiary", "encounters"];
+  const VIEWS = ["import", "sheet", "party", "encounters"];
   let currentView = "import";
   function showView(name) {
     if (currentView === "encounters" && name !== "encounters") {
@@ -939,7 +995,7 @@ const App = (() => {
     nav.classList.toggle("hidden", !state.isGM);
     if (!state.isGM) return;
     $("nav-sheet").textContent = state.sheet ? state.sheet.identity?.name || "Character" : "Characters";
-    const tabs = { "nav-sheet": ["sheet", "import"], "nav-party": ["party"], "nav-bestiary": ["bestiary"], "nav-encounters": ["encounters"] };
+    const tabs = { "nav-sheet": ["sheet", "import"], "nav-party": ["party"], "nav-encounters": ["encounters"] };
     for (const [id, views] of Object.entries(tabs)) {
       const on = views.includes(currentView);
       $(id).classList.toggle("is-active", on);
@@ -5927,7 +5983,6 @@ const App = (() => {
     });
     $("nav-sheet").onclick = () => (state.sheet ? showView("sheet") : showImport());
     $("nav-party").onclick = showParty;
-    $("nav-bestiary").onclick = showBestiary;
     $("nav-encounters").onclick = showEncounters;
     $("pick-target-pill").onclick = pickTarget;
     $("maxhp-add").onclick = () => {
@@ -5996,11 +6051,11 @@ const App = (() => {
         await requestSaves({ name, ability, dc, damage: damage ? { expr: damage, type: damageType || null } : null, half, ...targets });
       },
       onAnnounce: monsterAnnounce,
-      onShow: refreshEncounterPicker,
+      onAdd: addMonsterRow,
+      onPreview: () => Encounters.expand("preview"),
       scratchContext: scratchSpellContext,
       onError: (m) => toast(m, true),
     });
-    $("bestiary-speak").onclick = pickSpeaker;
 
     let searchTimer;
     $("bestiary-query").oninput = (ev) => {
@@ -6011,6 +6066,18 @@ const App = (() => {
     Encounters.configure({
       list: $("encounters-list"),
       detail: $("encounter-detail"),
+      home: $("fight-parts"),
+      addPanel: $("monster-add"),
+      previewSlot: $("monster-preview"),
+      sheet: $("bestiary-sheet"),
+      // Paired with exactly one status, so the board can say it on its own
+      isPaired: (n) => {
+        const e = Statuses.emoteFor(n);
+        return Boolean(e) && Statuses.conditionsFor(e).length === 1;
+      },
+      conditionNames: () => CONDITION_NAMES,
+      conditionHelp: (n) => DDB.conditionHelp(n)?.self || null,
+      onCondition: (c, n, on) => setMonsterCondition(c, n, on),
       onOpen: openEncounter,
       onDelete: async (id) => {
         await Store.deleteEncounter(id);
@@ -6058,7 +6125,6 @@ const App = (() => {
       onError: (m) => toast(m, true),
     });
     $("encounter-new").onclick = createEncounter;
-    $("bestiary-add-btn").onclick = addCurrentMonsterToEncounter;
 
     $("bestiary-online").onchange = (ev) => {
       Bestiary.setOnline(ev.target.checked);

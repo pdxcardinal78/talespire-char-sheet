@@ -378,7 +378,39 @@ const Monsters = (() => {
     return found ? normalize(found) : null;
   }
 
-  return { normalize, parseSpellcasting, loadBundled, searchBundled, searchOnline, get, signed };
+  /**
+   * A monster's hit points three ways, from its hit dice ("18d10+36"): the
+   * printed average, the most it could have, or a roll. A GM running a fight
+   * hard picks max; a roll makes three goblins three different goblins.
+   * Without hit dice, all three are the printed number.
+   */
+  function hpOptions(monster) {
+    const avg = Number(monster?.hp) || null;
+    const m = /^\s*(\d+)\s*d\s*(\d+)\s*(?:([+-])\s*(\d+))?\s*$/i.exec(String(monster?.hitDice || ""));
+    if (!m) return { average: avg, max: avg, roll: () => avg, formula: null };
+    const n = Number(m[1]);
+    const sides = Number(m[2]);
+    const bonus = m[3] ? (m[3] === "-" ? -1 : 1) * Number(m[4]) : 0;
+    const roll = () => {
+      let t = bonus;
+      for (let i = 0; i < n; i += 1) t += 1 + Math.floor(Math.random() * sides);
+      return Math.max(1, t);
+    };
+    return {
+      average: avg ?? Math.max(1, Math.floor(n * (sides + 1) / 2) + bonus),
+      max: Math.max(1, n * sides + bonus),
+      roll,
+      formula: `${n}d${sides}${bonus ? (bonus > 0 ? `+${bonus}` : bonus) : ""}`,
+    };
+  }
+
+  /** Hit points for a new combatant by the GM's choice: "average", "max" or "roll". */
+  function hpFor(monster, mode = "average") {
+    const o = hpOptions(monster);
+    return mode === "max" ? o.max : mode === "roll" ? o.roll() : o.average;
+  }
+
+  return { normalize, parseSpellcasting, loadBundled, searchBundled, searchOnline, get, signed, hpOptions, hpFor };
 })();
 
 if (typeof window !== "undefined") window.Monsters = Monsters;

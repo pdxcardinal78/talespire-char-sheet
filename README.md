@@ -652,11 +652,36 @@ mini, or set a condition. The board stays the source of truth and this reflects 
 
 ## GM: monsters
 
-The **Monsters** view searches a bundled copy of the 322 SRD monsters and opens
-any of them as a rollable sheet: attacks stage to-hit and damage in one throw,
-abilities roll saves, skills roll checks. **Speak as…** picks a mini and routes
-every roll through `chat.sendAsCreature`, so the chat reads as the monster
-rather than as you — a GM-only call.
+Monsters live inside **Fights** (there's no separate Monsters tab). With an
+encounter open, *Add monsters* at the bottom searches a bundled copy of the 322
+SRD monsters. Set *How many* and *HP* (Average, Max or Rolled; rolled is rolled
+for each one), then press *Add* on a result. Clicking a result's name previews
+its stat block there.
+
+A combatant's **Stats** button opens its stat block under its own row, without
+leaving the fight; *Hide stats* folds it away. Attacks stage to-hit and damage
+in one throw, abilities roll saves, skills roll checks. A combatant linked to a
+mini posts its rolls through `chat.sendAsCreature`, so the chat reads as that
+mini rather than as you (a GM-only call).
+
+### A combatant's hit points, changes and conditions
+
+- **Hit points.** Chosen when added: the printed average, the most its hit
+  dice allow, or a roll. The stat block's *Max HP* row changes it later: *Avg*,
+  *Max*, *Roll*, or any number. Damage already taken carries over (a goblin 3
+  down stays 3 down). On a linked mini with the bridge, the new numbers go onto
+  the mini.
+- **Changes for this fight.** ✎ on an attack or save action changes its name,
+  to hit or save DC, damage dice and damage type: a scimitar that bites with
+  cold. ✎ on a spell does the same, including its name: a cultist's Fireball as
+  a cold Frostball. The changed damage type goes onto the dice, so the GM's
+  inbox and resistances see it. Changes apply to every one of that monster in
+  the encounter and are saved with it.
+- **Conditions.** Each combatant has condition chips and *+ Condition*. On a
+  linked mini, a condition paired with a TaleSpire status (see §TaleSpire
+  statuses and conditions) is set on the mini too, and one set from the radial
+  menu shows up here. Adding a condition its stat block is immune to warns, and
+  adds it anyway.
 
 Open5e is the second source, behind a checkbox. Its catalogue is 3,207 monsters
 across Tome of Beasts 1/2/3/2023, Creature Codex, Monstrous Menagerie, Tal'Dorei
@@ -965,7 +990,7 @@ the game — the worst way for a bug to behave:
   `access-control-allow-origin: *`, which covers the `null` origin a file page
   presents, so the opt-in online search still works.
 
-The monster data is ~540 KB, so it loads on first use of the Monsters view rather
+The monster data is ~540 KB, so it loads on first use of Fights' monster search rather
 than at startup: a character sheet should not wait on a bestiary.
 
 ## Where TaleSpire keeps the data
@@ -1158,7 +1183,7 @@ and a card lists who's inside.
 ## The GM's monster attacks
 
 The table rolls and a person calls hit or miss, as before. The exception is the
-GM's own turn: when a monster from the Monsters view attacks a picked target
+GM's own turn: when a monster's stat block in Fights attacks a picked target
 whose AC the GM can read (an *AC* or *Armor Class* stat), the panel calls it.
 
 - A natural 1 misses and a natural 20 crits; otherwise the total against AC.
@@ -1179,7 +1204,7 @@ Ask for a save and the table runs it, ZeroGear style (`lib/saves.js`):
 - **Asking.** A spell with a save gets *Request DEX saves* on its card, and a
   zone card for it gets *Ask for saves*: everyone inside is asked. Without a
   zone, it's the lassoed minis, then the target. A monster's save action in
-  the Monsters view gets the same button.
+  a monster's stat block in Fights gets the same button.
 - **Who rolls.** Player characters (minis a player owns) get a prompt on their
   own panel, *Save asked: Dexterity save · Fireball*, with a Roll button. The DC
   is never sent. Monsters roll on the GM's panel, all in one throw, with their

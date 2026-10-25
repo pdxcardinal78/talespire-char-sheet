@@ -1865,3 +1865,25 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 .monster-lasting .hint { margin: 0; }
 .monster-ac-input { width: 46px; background: rgba(0, 0, 0, 0.25); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 5px; font: inherit; font-size: 12px; }
 .combatant { flex-wrap: wrap; }
+.combatant .monster-turn, .combatant .combatant-conds { grid-column: 1 / -1; }
+.combatant .btn.is-on { background: var(--accent-bg); color: var(--accent-hover); }
+
+/* Conditions on a monster */
+.combatant-conds { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.combatant-conds .condition { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 8px; border: 1px solid var(--danger); border-radius: 999px; background: var(--bad-bg); color: #f0a8a5; font-size: 12px; }
+.combatant-cond-pick { font-size: 12px; padding: 1px 6px; max-width: 120px; }
+
+/* A combatant's stat block, open under its row */
+.combatant-sheet { margin: 0 0 8px 10px; padding: 8px 10px; border-left: 2px solid var(--accent); background: var(--bg-2); border-radius: 0 var(--radius) var(--radius) 0; }
+.combatant-sheet .bestiary-sheet { margin-top: 0; }
+.monster-hp-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 0 8px; }
+.monster-hp-pick .spell-edit-label { margin-right: 4px; }
+.bestiary-action.is-edited .bestiary-action-name { color: var(--accent-hover); }
+
+/* Adding monsters, inside the open encounter */
+.monster-add { margin-top: 14px; padding-top: 6px; border-top: 1px solid var(--line); }
+.monster-add-opts { gap: 12px; margin: 6px 0; }
+.monster-add-opts input[type="number"] { width: 48px; }
+.bestiary-result { display: flex; gap: 4px; align-items: stretch; }
+.bestiary-result .bestiary-row { flex: 1; min-width: 0; }
+.monster-preview .bestiary-sheet { padding: 8px 10px; border-left: 2px solid var(--line); background: var(--bg-2); border-radius: 0 var(--radius) var(--radius) 0; }

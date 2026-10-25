@@ -25,6 +25,7 @@ const Encounters = (() => {
   let queue = null;       // TaleSpire's initiative queue
   let selectedId = null;  // combatant the next damage lands on
   let inbox = [];         // damage rolled elsewhere on the board, awaiting a target
+  let expanded = null;    // combatant whose stat block is open under its row, or "preview"
 
   function configure(d) {
     deps = d;
@@ -45,17 +46,21 @@ const Encounters = (() => {
    * Add a monster to an encounter. `count` makes three goblins three rows, each
    * numbered, because that is how they will be killed.
    */
-  function addMonster(encounter, monster, count = 1) {
+  function addMonster(encounter, monster, count = 1, hpMode = "average") {
     const existing = encounter.combatants.filter((c) => c.slug === monster.slug).length;
     for (let i = 0; i < count; i += 1) {
       const n = existing + i + 1;
+      // Average, max, or rolled one at a time so each goblin is its own
+      const hp = typeof Monsters !== "undefined" && Monsters.hpFor ? Monsters.hpFor(monster, hpMode) : monster.hp ?? null;
       encounter.combatants.push({
         id: uid(),
         slug: monster.slug,
         name: monster.name,
         label: count > 1 || existing ? `${monster.name} ${n}` : monster.name,
-        maxHp: monster.hp ?? null,
-        hp: monster.hp ?? null,
+        maxHp: hp ?? null,
+        hp: hp ?? null,
+        hpMode,
+        conditions: [],
         ac: monster.ac ?? null,
         // Walking speed, for this monster's movement on its turn
         speed: Number((/^(\d+)\s*ft/.exec(String(monster.speed || "")) || [])[1]) || null,
@@ -170,6 +175,9 @@ const Encounters = (() => {
           temp: v.tempSource === "stat" ? v.temp : null,
           tempIndex: v.tempIndex, tempMax: v.tempMax,
         });
+      } else if (info?.id) {
+        // No hit points on the mini, but its statuses still count
+        boardHp.set(info.id, { conditions: Statuses.on(info).conditions });
       }
       if (info?.id && info.name) names.set(info.id, info.name);
     }
@@ -290,7 +298,7 @@ const Encounters = (() => {
     host.replaceChildren();
 
     if (!encounters.length) {
-      host.appendChild(el("p", "hint", "No encounters yet. Open a monster and press “Add to encounter”."));
+      host.appendChild(el("p", "hint", "No encounters yet. Name one above and press Create, then add monsters to it."));
       return;
     }
 
@@ -309,6 +317,51 @@ const Encounters = (() => {
     }
   }
 
+  /**
+   * A combatant's conditions. On a linked mini the board is the truth for any
+   * condition paired with a TaleSpire status (it may have been set from the
+   * radial menu); everything else is kept on the combatant.
+   */
+  function conditionsOf(c) {
+    const board = c.creatureId ? boardHp.get(c.creatureId) : null;
+    const onBoard = board?.conditions || [];
+    const kept = (c.conditions || []).filter((n) => !(board && deps.isPaired?.(n)));
+    return [...new Set([...onBoard, ...kept])];
+  }
+
+  function conditionChips(c) {
+    const box = el("div", "combatant-conds");
+    const list = conditionsOf(c);
+    for (const n of list) {
+      const chip = el("span", "condition");
+      chip.appendChild(el("span", null, n));
+      const help = deps.conditionHelp?.(n);
+      if (help) chip.title = help;
+      const x = el("button", "chip-btn", "×");
+      x.title = `${c.label} is no longer ${n}`;
+      x.onclick = () => deps.onCondition?.(c, n, false);
+      chip.appendChild(x);
+      box.appendChild(chip);
+    }
+    const pick = document.createElement("select");
+    pick.className = "pill pill-add combatant-cond-pick";
+    pick.setAttribute("aria-label", `Add a condition to ${c.label}`);
+    const first = document.createElement("option");
+    first.value = "";
+    first.textContent = "+ Condition";
+    pick.appendChild(first);
+    for (const n of deps.conditionNames?.() || []) {
+      if (list.includes(n)) continue;
+      const o = document.createElement("option");
+      o.value = n;
+      o.textContent = n;
+      pick.appendChild(o);
+    }
+    pick.onchange = () => pick.value && deps.onCondition?.(c, pick.value, true);
+    box.appendChild(pick);
+    return box;
+  }
+
   function combatantRow(c) {
     const hp = hpFor(c);
     const share = hp.max ? Math.max(0, Math.min(1, (hp.value ?? 0) / hp.max)) : null;
@@ -319,8 +372,7 @@ const Encounters = (() => {
     const name = el("button", "combatant-name");
     name.innerHTML =
       `<span>${escape(c.label)}</span>` +
-      `<span class="sub">${escape(c.creatureId ? "linked" : "no mini")}${c.ac != null ? ` · AC ${c.ac}` : ""}` +
-      `${(boardHp.get(c.creatureId)?.conditions || []).map((n) => ` · <span class="cond-inline">${escape(n)}</span>`).join("")}</span>`;
+      `<span class="sub">${escape(c.creatureId ? "linked" : "no mini")}${c.ac != null ? ` · AC ${c.ac}` : ""}</span>`;
     name.title = "Select — damage rolled on the board applies here";
     name.onclick = () => select(c.id);
     row.appendChild(name);
@@ -382,13 +434,13 @@ const Encounters = (() => {
     }
     row.appendChild(hpBox);
 
-    row.appendChild(turnTools(c));
-
     const controls = el("div", "combatant-controls");
 
-    const stat = el("button", "btn btn-small btn-ghost", "Stat");
-    stat.title = "Open this monster's statblock";
-    stat.onclick = () => deps.onOpenMonster(c);
+    const open = expanded === c.id;
+    const stat = el("button", `btn btn-small btn-ghost${open ? " is-on" : ""}`, open ? "Hide stats" : "Stats");
+    stat.title = open ? "Fold the stat block away" : "Open its stat block here";
+    stat.setAttribute("aria-expanded", open ? "true" : "false");
+    stat.onclick = () => (open ? expand(null) : deps.onOpenMonster(c));
     controls.appendChild(stat);
 
     const link = el("button", "btn btn-small btn-ghost", c.creatureId ? "Unlink" : "Link mini");
@@ -401,6 +453,9 @@ const Encounters = (() => {
     controls.appendChild(drop);
 
     row.appendChild(controls);
+    // Second line, full width: conditions, then its turn tools
+    row.appendChild(conditionChips(c));
+    row.appendChild(turnTools(c));
     return row;
   }
 
@@ -476,7 +531,7 @@ const Encounters = (() => {
           : "Open this statblock"
         : "";
       open.disabled = !entry.combatant;
-      open.onclick = () => entry.combatant && deps.onOpenMonster(entry.combatant);
+      open.onclick = () => entry.combatant && deps.onOpenMonster(entry.combatant, { scroll: true });
       row.appendChild(open);
 
       // The escape hatch. Nothing about a mini's name has to agree with the
@@ -559,6 +614,8 @@ const Encounters = (() => {
   function render() {
     const host = deps.detail;
     if (!host) return;
+    // Park the shared parts before clearing, so they're never detached
+    if (deps.home) for (const n of [deps.addPanel, deps.sheet]) if (n) deps.home.appendChild(n);
     host.replaceChildren();
     if (!current) return;
 
@@ -580,13 +637,35 @@ const Encounters = (() => {
 
     host.appendChild(el("h3", "bestiary-heading", "Combatants"));
     if (!current.combatants.length) {
-      host.appendChild(el("p", "hint", "Nothing here yet. Add monsters from the Monsters view."));
-      return;
+      host.appendChild(el("p", "hint", "Nothing here yet. Search for monsters below and add them."));
     }
-    for (const c of current.combatants) host.appendChild(combatantRow(c));
+    for (const c of current.combatants) {
+      host.appendChild(combatantRow(c));
+      // The stat block is one element moved under whichever row opened it, so
+      // redrawing the fight (it redraws often) never loses what's open
+      if (expanded === c.id && deps.sheet) {
+        const slot = el("div", "combatant-sheet");
+        slot.appendChild(deps.sheet);
+        host.appendChild(slot);
+      }
+    }
+
+    // Adding monsters, inside the fight they're added to
+    if (deps.addPanel) {
+      host.appendChild(deps.addPanel);
+      if (expanded === "preview" && deps.sheet && deps.previewSlot) deps.previewSlot.appendChild(deps.sheet);
+    }
+  }
+
+  /** Open a stat block under a combatant's row (an id), under the search ("preview"), or close it (null). */
+  function expand(id) {
+    expanded = id;
+    if (!id && deps.sheet) deps.sheet.remove();
+    render();
   }
 
   function setCurrent(encounter) {
+    if (current?.id !== encounter?.id) expanded = null;
     current = encounter;
   }
 
@@ -595,7 +674,8 @@ const Encounters = (() => {
 
   return {
     configure, addMonster, removeCombatant, hpFor, applyDamage, noteBoardHp, isWatching,
-    readBoard, setQueue, turnOrder, renderList, render, setCurrent,
+    readBoard, setQueue, turnOrder, renderList, render, setCurrent, expand, conditionsOf,
+    get expanded() { return expanded; },
     select, selected, offerDamage, dismissDamage,
     get current() { return current; },
     get waiting() { return inbox.length; },

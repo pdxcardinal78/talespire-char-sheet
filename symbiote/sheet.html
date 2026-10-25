@@ -11,8 +11,7 @@
 <nav id="gm-nav" class="gm-nav tabs hidden" aria-label="GM views">
   <button id="nav-sheet" class="tab" type="button" title="Your character, or the character list">Characters</button>
   <button id="nav-party" class="tab" type="button" title="Everyone on the board">Party</button>
-  <button id="nav-bestiary" class="tab" type="button" title="Monster stat blocks">Monsters</button>
-  <button id="nav-encounters" class="tab" type="button" title="Encounters and initiative">Fights</button>
+  <button id="nav-encounters" class="tab" type="button" title="Encounters, monsters and initiative">Fights</button>
 </nav>
 
 <!-- Import: shown until a sheet is loaded, and reachable again from the header. -->
@@ -303,33 +302,6 @@
   </details>
 </section>
 
-<!-- GM: monsters. The SRD set ships with the mod; Open5e is opt-in because it
-     is the only request this panel makes off your machine. -->
-<section id="bestiary-view" class="view hidden">
-  <header class="sheet-header">
-    <div class="who">
-      <h1>Monsters</h1>
-      <p id="bestiary-speaker">Rolls post from you</p>
-    </div>
-    <button id="bestiary-speak" class="btn btn-ghost" title="Post rolls as a mini on the board">Speak as…</button>
-  </header>
-
-  <div class="row bestiary-search">
-    <input id="bestiary-query" type="text" placeholder="Search monsters" spellcheck="false">
-    <label class="inline-check" title="Search Open5e's full catalogue. This sends the search term off your machine.">
-      <input id="bestiary-online" type="checkbox"> Open5e
-    </label>
-  </div>
-
-  <div id="bestiary-results" class="bestiary-results"></div>
-  <div id="bestiary-add" class="row bestiary-add hidden">
-    <select id="bestiary-encounter" aria-label="Encounter to add to"></select>
-    <input id="bestiary-count" type="number" min="1" max="20" value="1" aria-label="How many">
-    <button id="bestiary-add-btn" class="btn btn-small">Add to encounter</button>
-  </div>
-  <div id="bestiary-sheet" class="bestiary-sheet"></div>
-</section>
-
 <!-- GM: encounters. Prepared fights, the minis standing in for them, and
      TaleSpire's turn order alongside. -->
 <section id="encounters-view" class="view hidden">
@@ -348,6 +320,35 @@
   <div id="encounters-list" class="encounters-list"></div>
 
   <div id="encounter-detail" class="encounter-detail"></div>
+
+  <!-- Parked here while no encounter is open; the open encounter shows them
+       inside itself (lib/encounters.js moves them in on every draw). The SRD set
+       ships with the mod; Open5e is opt-in because it is the only request this
+       panel makes off your machine. -->
+  <div id="fight-parts" class="hidden">
+    <div id="monster-add" class="monster-add">
+      <h3 class="bestiary-heading">Add monsters</h3>
+      <div class="row bestiary-search">
+        <input id="bestiary-query" type="text" placeholder="Search monsters" spellcheck="false">
+        <label class="inline-check" title="Search Open5e's full catalogue. This sends the search term off your machine.">
+          <input id="bestiary-online" type="checkbox"> Open5e
+        </label>
+      </div>
+      <div class="row monster-add-opts">
+        <label class="inline-check">How many <input id="bestiary-count" type="number" min="1" max="20" value="1"></label>
+        <label class="inline-check" title="Hit points for each one added">HP
+          <select id="monster-hp-mode">
+            <option value="average">Average</option>
+            <option value="max">Max</option>
+            <option value="roll">Rolled</option>
+          </select>
+        </label>
+      </div>
+      <div id="bestiary-results" class="bestiary-results"></div>
+      <div id="monster-preview" class="monster-preview"></div>
+    </div>
+    <div id="bestiary-sheet" class="bestiary-sheet"></div>
+  </div>
 </section>
 
 <!-- Who is inside a spell's area; shown over whichever view is open -->
