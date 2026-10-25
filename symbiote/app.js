@@ -45,6 +45,8 @@ const App = (() => {
     state.ready = true;
     try {
       await Store.load();
+      // Spells filled in by hand live in the library, beside the characters
+      Spells.useCustom(() => Store.customSpells());
       renderVersion();
       await detectGM();
       Bridge.probe(); // not awaited: an absent plugin must not slow startup
@@ -169,7 +171,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.26.0";
+  const APP_VERSION = "0.27.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -4657,20 +4659,83 @@ const App = (() => {
       box.appendChild(list);
 
       for (const g of entries.sort((a, b) => (a.spell?.level ?? 9) - (b.spell?.level ?? 9))) {
+        const title = titleCase(g.name);
+        if (state.fillingSpell === Spells.spellKey(g.name)) {
+          list.appendChild(customSpellForm(title, g.spell?.custom ? Spells.lookup(g.name) : null));
+          continue;
+        }
         if (!g.spell) {
           const miss = document.createElement("div");
-          miss.className = "hint dimmed";
-          miss.textContent = `${titleCase(g.name)}: granted at level ${g.atLevel}, not in the bundled SRD.`;
+          miss.className = "spell-missing";
+          miss.appendChild(Object.assign(document.createElement("span"), {
+            className: "hint",
+            textContent: `${title}: granted at level ${g.atLevel}, not in the bundled SRD.`,
+          }));
+          const fill = document.createElement("button");
+          fill.className = "btn btn-small btn-primary";
+          fill.textContent = "Fill in";
+          fill.title = "Type or paste this spell's details once; then it casts like any other";
+          fill.onclick = () => {
+            state.fillingSpell = Spells.spellKey(g.name);
+            renderSpells(s);
+          };
+          miss.appendChild(fill);
           list.appendChild(miss);
           continue;
         }
         list.appendChild(spellCard(g.spell, block));
+        if (g.spell.custom) {
+          const edit = document.createElement("button");
+          edit.className = "link-btn spell-custom-edit";
+          edit.textContent = `✎ ${title} was filled in by hand; edit it`;
+          edit.onclick = () => {
+            state.fillingSpell = Spells.spellKey(g.name);
+            renderSpells(s);
+          };
+          list.appendChild(edit);
+        }
       }
     }
   }
 
+  /**
+   * The fill-in form for a spell the bundled SRD doesn't have (lib/spellform.js).
+   * Saved once per name in the library, so every character and monster that
+   * has the spell gets it.
+   */
+  function customSpellForm(name, existing) {
+    const close = () => {
+      state.fillingSpell = null;
+      if (state.sheet) renderSpells(state.sheet);
+    };
+    return SpellForm.build({
+      name,
+      existing,
+      onSave: async (rec) => {
+        await saveCustomSpell(rec);
+        toast(`${rec.name} saved. It casts like any other spell now.`);
+      },
+      onCancel: close,
+      onDelete: async () => {
+        await saveCustomSpell(null, name);
+        toast(`${name} forgotten.`);
+      },
+    });
+  }
+
+  /** Keep (or forget, with rec null) a filled-in spell, and redraw whatever shows it. */
+  async function saveCustomSpell(rec, name = rec?.name) {
+    await Store.setCustomSpell(Spells.spellKey(name), rec);
+    state.fillingSpell = null;
+    state.granted = null; // re-resolve the granted spells against it
+    if (state.sheet) renderSpells(state.sheet);
+    Bestiary.refresh();
+  }
+
+  // "aura of vitality" -> "Aura of Vitality": small words stay small after the first
+  const SMALL = new Set(["of", "the", "and", "a", "an", "to", "in", "on", "from", "with", "for", "or"]);
   const titleCase = (t) =>
-    String(t || "").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+    String(t || "").split(" ").map((w, i) => (i > 0 && SMALL.has(w) ? w : w.replace(/^[a-z]/, (c) => c.toUpperCase()))).join(" ");
 
   /** Slot pips double as the tracker: click one to spend or give back. */
   function renderSlots(s) {
@@ -6052,6 +6117,12 @@ const App = (() => {
       },
       onAnnounce: monsterAnnounce,
       onAdd: addMonsterRow,
+      spellForm: (name, existing, done) => SpellForm.build({
+        name, existing,
+        onSave: async (rec) => { await saveCustomSpell(rec); done(); toast(`${rec.name} saved for every monster and character that has it.`); },
+        onCancel: done,
+        onDelete: async () => { await saveCustomSpell(null, name); done(); },
+      }),
       onPreview: () => Encounters.expand("preview"),
       scratchContext: scratchSpellContext,
       onError: (m) => toast(m, true),

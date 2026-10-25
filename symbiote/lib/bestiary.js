@@ -24,6 +24,7 @@ const Bestiary = (() => {
   let ctx = null;      // { label, state: { uses, overrides }, onChange }
   let spells = null;   // resolved spells for `current`, by block then group
   let editing = null;  // the spell whose override form is open
+  let filling = null;  // the spell (key) whose fill-in form is open
 
   function configure(d) {
     deps = d;
@@ -306,7 +307,7 @@ const Bestiary = (() => {
       spell.concentration ? "conc." : null,
       spell.note,
       spell.edited ? "edited" : null,
-      spell.found ? null : "not in the bundled list",
+      spell.found ? (spell.custom ? "filled in" : null) : "not in the bundled list",
     ].filter(Boolean);
     name.innerHTML =
       `<span class="monster-spell-title">${escape(spell.name)}</span>` +
@@ -375,6 +376,17 @@ const Bestiary = (() => {
       );
     }
 
+    // Not in the bundled SRD: fill it in once, by hand or by pasting its text
+    if (!spell.found || spell.custom) {
+      const fill = el("button", `btn btn-small ${spell.found ? "btn-ghost" : "btn-primary"}`, spell.found ? "Details" : "Fill in");
+      fill.title = spell.found ? "Edit this hand-filled spell's details" : "Type or paste this spell's details once; then it casts like any other";
+      fill.onclick = () => {
+        filling = filling === spell.key ? null : spell.key;
+        renderSheet();
+      };
+      buttons.appendChild(fill);
+    }
+
     const edit = el("button", "btn btn-small btn-ghost", "✎");
     edit.title = "Change this spell for this monster";
     edit.onclick = () => {
@@ -385,6 +397,15 @@ const Bestiary = (() => {
 
     wrap.appendChild(buttons);
     if (editing === spell.key) wrap.appendChild(overrideForm(spell, block));
+    if (filling === spell.key && deps.spellForm) {
+      const small = new Set(["of", "the", "and", "a", "an", "to", "in", "on", "from", "with", "for", "or"]);
+      const title = String(spell.baseName || spell.name).toLowerCase().split(" ")
+        .map((w, i) => (i > 0 && small.has(w) ? w : w.replace(/^[a-z]/, (c) => c.toUpperCase()))).join(" ");
+      wrap.appendChild(deps.spellForm(title, spell.custom ? Spells.lookup(spell.key) : null, () => {
+        filling = null;
+        renderSheet();
+      }));
+    }
 
     const lines = [
       spell.level != null ? (spell.level === 0 ? "Cantrip" : `Level ${spell.level}`) : null,
@@ -396,7 +417,7 @@ const Bestiary = (() => {
     ].filter(Boolean);
     if (lines.length) body.appendChild(el("p", "bestiary-lines", lines.join(" · ")));
     body.appendChild(
-      el("p", "bestiary-desc", spell.found ? spell.description : "Not in the bundled spell list — run it from the book.")
+      el("p", "bestiary-desc", spell.found ? spell.description : "Not in the bundled spell list. Fill it in to cast it from here.")
     );
     wrap.appendChild(body);
 
@@ -752,6 +773,14 @@ const Bestiary = (() => {
    * changes these are. Without one the statblock still casts; it just doesn't
    * remember.
    */
+  /** Redraw after a filled-in spell changed: resolve the spells again. */
+  async function refresh() {
+    if (!current) return;
+    filling = null;
+    await resolveSpells();
+    renderSheet();
+  }
+
   async function show(monster, context = null) {
     current = monster;
     ctx = context;
@@ -760,7 +789,7 @@ const Bestiary = (() => {
     renderSheet();
   }
 
-  return { configure, runSearch, setOnline, renderSheet, show, effectiveAction, get current() { return current; }, get context() { return ctx; } };
+  return { configure, runSearch, setOnline, renderSheet, show, refresh, effectiveAction, get current() { return current; }, get context() { return ctx; } };
 })();
 
 if (typeof window !== "undefined") window.Bestiary = Bestiary;

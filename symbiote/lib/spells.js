@@ -43,9 +43,47 @@ const Spells = (() => {
       .replace(/\s+/g, " ")
       .trim();
 
+  /**
+   * The 2024 SRD dropped the wizards' names: Leomund's Tiny Hut is Tiny Hut,
+   * Bigby's Hand is Arcane Hand. D&D Beyond and older books still use the old
+   * ones, so a name is tried as written, then without its owner, then by the
+   * few that were renamed outright.
+   */
+  const OWNERS = /^(?:leomund|tasha|bigby|mordenkainen|otiluke|melf|evard|rary|drawmij|nystul|tenser|otto|snilloc|maximilian|abi-dalzim|aganazzar|tasha|jim)'s\s+/;
+  const RENAMED = {
+    hand: "arcane hand",
+    sword: "arcane sword",
+    "magic aura": "arcanist's magic aura",
+  };
+  const variants = (name) => {
+    const k = key(name);
+    const bare = k.replace(OWNERS, "");
+    return [...new Set([k, bare, RENAMED[bare], k.replace(/\s+/g, "")].filter(Boolean))];
+  };
+
+  // Spells filled in by hand, by key; the caller supplies where they're kept
+  let customSource = () => ({});
+  function useCustom(fn) {
+    customSource = fn;
+  }
+  const custom = (name) => {
+    const all = customSource() || {};
+    for (const k of variants(name)) if (all[k]) return all[k];
+    return null;
+  };
+
+  /** A spell by name: the bundled SRD (under its old name too), then any filled in by hand. */
+  function lookup(name) {
+    for (const k of variants(name)) {
+      const hit = index?.get(k);
+      if (hit) return hit;
+    }
+    return custom(name);
+  }
+
   async function find(name) {
     await loadBundled();
-    return index.get(key(name)) || null;
+    return lookup(name);
   }
 
   // --- adapting to the shape the sheet already renders ----------------------
@@ -108,7 +146,7 @@ const Spells = (() => {
 
     // Healing keeps its flat part separate, so upcasting can rebuild the dice
     // and put the modifier back once rather than once per slot level.
-    const healFlat = heals && ADDS_CASTER_MOD.test(rec.desc || "") ? abilityMod : 0;
+    const healFlat = heals && (rec.adds_mod || ADDS_CASTER_MOD.test(rec.desc || "")) ? abilityMod : 0;
     const healTotal = (rolled?.flat || 0) + healFlat;
 
     return {
@@ -125,6 +163,7 @@ const Spells = (() => {
       upcast: null,
       variants: [],
       canUpcast: Boolean(rec.upcast) && rec.level > 0,
+      custom: Boolean(rec.custom),
 
       prepared: null,
       alwaysPrepared: true,
@@ -136,8 +175,8 @@ const Spells = (() => {
       aoe: rec.shape_type && rec.shape_size
         ? `${rec.shape_size} ${rec.shape_size_unit || "feet"} ${rec.shape_type}`
         : null,
-      duration: rec.concentration ? `Concentration, ${rec.duration}` : TITLE(rec.duration),
-      components: [rec.verbal && "V", rec.somatic && "S", rec.material && "M"].filter(Boolean).join(", "),
+      duration: rec.concentration ? `Concentration, ${rec.duration || "up to 1 minute"}` : TITLE(rec.duration),
+      components: rec.components_text ?? [rec.verbal && "V", rec.somatic && "S", rec.material && "M"].filter(Boolean).join(", "),
       materials: rec.material_specified || null,
 
       requiresAttackRoll: isAttack(rec),
@@ -149,7 +188,7 @@ const Spells = (() => {
 
       // Marks where this came from, so the sheet can say so rather than implying
       // D&D Beyond sent it.
-      filledFrom: source || bundled?.source || "srd",
+      filledFrom: source || (rec.custom ? "custom" : bundled?.source || "srd"),
     };
   }
 
@@ -173,7 +212,7 @@ const Spells = (() => {
    * in one pass.
    */
   function monsterSpell(ref, block, { casterLevel = 1, abilityMod = 0, override = {} } = {}) {
-    const rec = index?.get(key(ref.name)) || index?.get(key(ref.name).replace(/\s+/g, "")) || null;
+    const rec = lookup(ref.name);
     const base = rec ? toSheetSpell(rec, { characterLevel: casterLevel, abilityMod }) : null;
 
     // Whichever dice the spell rolls — a heal is as worth overriding as a hit.
@@ -190,6 +229,7 @@ const Spells = (() => {
       // elemental only". Never part of the spell, never dropped either.
       note: ref.note || null,
       found: Boolean(rec),
+      custom: Boolean(rec?.custom),
 
       level: base?.level ?? null,
       school: base?.school || null,
@@ -220,6 +260,8 @@ const Spells = (() => {
   return {
     loadBundled,
     find,
+    lookup,
+    useCustom,
     /** How a spell name is matched and how an override is filed against it. */
     spellKey: key,
     monsterSpell,

@@ -512,6 +512,33 @@ a saving throw is treated as a save spell. And healing spells put their dice in
 `damage_roll` with no `damage_types`, which is how Cure Wounds is recognised as
 healing rather than damage.
 
+### Spells the SRD doesn't have
+
+Two things cover the gap, without shipping more data.
+
+- **Renamed spells.** The 2024 SRD dropped the wizards' names, so Leomund's
+  Tiny Hut is *Tiny Hut*, Tasha's Hideous Laughter is *Hideous Laughter*, and
+  Bigby's Hand is *Arcane Hand*. A name is tried as written, then without its
+  owner, then by the few renamed outright, so these find their SRD versions on
+  their own (`lib/spells.js`).
+- **Filling in by hand.** A spell still missing (Aura of Vitality, Circle of
+  Power, anything from Xanathar's or homebrew) shows **Fill in**: on a
+  character's granted spells, and on a monster's spell marked "not in the
+  bundled list". The form takes level, school, casting time, range, duration,
+  components, concentration and ritual, how it lands (spell attack or which
+  save), damage or healing dice and type, extra dice per slot level, an area,
+  and the description. Paste the spell's text from D&D Beyond or the book into
+  the box at the top and the fields fill in (`lib/spellparse.js`); check them
+  and save.
+
+A filled-in spell is saved once, by name, in the library on that computer, in
+the bundled spells' own shape, so it casts through the same code as an SRD
+spell: slots, concentration, typed damage, saves, upcasting, zones. Every
+character and monster on that computer that has the spell gets it. A
+character's filled-in spell has an edit link under its card, a monster's a
+*Details* button; *Forget it* removes it. It isn't shared with other players'
+panels, so each machine fills in its own once.
+
 ## Class resources
 
 **Riders on a hit.** When a weapon attack is called a hit, the damage card lists

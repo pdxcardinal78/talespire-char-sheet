@@ -1887,3 +1887,28 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 .bestiary-result { display: flex; gap: 4px; align-items: stretch; }
 .bestiary-result .bestiary-row { flex: 1; min-width: 0; }
 .monster-preview .bestiary-sheet { padding: 8px 10px; border-left: 2px solid var(--line); background: var(--bg-2); border-radius: 0 var(--radius) var(--radius) 0; }
+
+/* ---------- filling in a spell the SRD doesn't have ---------- */
+.spell-missing { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; }
+.spell-missing .hint { margin: 0; }
+.spell-custom-edit { display: block; margin: 0 8px 6px; font-size: 12px; }
+.spell-fill { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin: 4px 0; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--bg-2); }
+.spell-fill-head { display: flex; flex-direction: column; gap: 2px; }
+.spell-fill-head .hint { margin: 0; }
+.spell-fill-paste { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; background: rgba(0, 0, 0, 0.25); color: var(--fg); border: 1px dashed var(--line); border-radius: 6px; padding: 6px; resize: vertical; }
+.spell-fill-note:empty { display: none; }
+.spell-fill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 10px; align-items: end; }
+.spell-fill-grid .spell-edit-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.spell-fill-grid .spell-edit-field.is-wide { grid-column: 1 / -1; }
+.spell-fill-grid .spell-edit-input { width: 100%; box-sizing: border-box; }
+.spell-fill-grid textarea.spell-edit-input { font: inherit; font-size: 12px; resize: vertical; }
+.spell-fill-check { align-self: center; }
+.spell-fill .spell-edit-input {
+  background: var(--bg-3); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px 6px; font: inherit; font-size: 12px;
+}
+/* Inputs here sit in column flex labels; don't let them stretch tall */
+.spell-fill-grid .spell-edit-input { flex: 0 0 auto; height: auto; }
+.spell-fill-grid select.spell-edit-input { padding: 3px 4px; }
+.spell-fill-grid .spell-fill-check { white-space: normal; min-width: 0; line-height: 1.25; }

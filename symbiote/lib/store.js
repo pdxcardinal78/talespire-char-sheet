@@ -15,7 +15,7 @@
  */
 
 const Store = (() => {
-  const EMPTY_LIBRARY = { version: 1, sheets: {}, statusMap: {}, conditionMap: {}, statusNames: {} };
+  const EMPTY_LIBRARY = { version: 1, sheets: {}, statusMap: {}, conditionMap: {}, statusNames: {}, customSpells: {} };
   const EMPTY_BINDINGS = { version: 1, bindings: {}, statNamesOffered: false, encounters: {}, statusMap: {} };
 
   let library = null; // { version, sheets: { [sheetId]: sheet } }
@@ -153,6 +153,7 @@ const Store = (() => {
     if (!bindings.statusMap) bindings.statusMap = {};
     if (!library.statusMap) library.statusMap = {};
     if (!library.statusNames) library.statusNames = {};
+    if (!library.customSpells) library.customSpells = {};
     // Status ids are TaleSpire content ids, the same in every campaign, so
     // pairings moved from campaign storage (0.15.0) to the global library.
     // Bring any campaign pairings across once; an existing global one wins.
@@ -332,6 +333,18 @@ const Store = (() => {
     await writeBlob("global", library);
   }
 
+  // Spells the bundled SRD doesn't have, filled in by hand: spell key -> a
+  // record in the bundled spells' shape. One per name, for every character and
+  // monster on this machine.
+  const customSpells = () => library.customSpells || {};
+
+  async function setCustomSpell(key, rec) {
+    if (!library.customSpells) library.customSpells = {};
+    if (rec) library.customSpells[key] = rec;
+    else delete library.customSpells[key];
+    await writeBlob("global", library);
+  }
+
   async function setStatusNames(names) {
     const current = library.statusNames || {};
     const same = Object.keys(names).length === Object.keys(current).length &&
@@ -345,6 +358,8 @@ const Store = (() => {
     load,
     persist,
     conditionMap,
+    customSpells,
+    setCustomSpell,
     statusNames,
     setConditionMapping,
     setStatusNames,
