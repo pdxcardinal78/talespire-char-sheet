@@ -171,8 +171,12 @@ on starts near the top of the panel:
 
 - Name, and whether a mini is linked (*link selected mini* / *unlink*).
   **☰** switches characters.
-- A vitals card: AC, speed and initiative (click it to roll), and the HP bar
+- A vitals card: AC, speed and initiative, and the HP bar
   with temp HP in blue. *more* opens max HP changes, hit dice and rests.
+  **INIT** is outlined as a button with *roll* under it: click it to roll
+  initiative. When TaleSpire goes into initiative and you haven't rolled this
+  fight, the combat card shows a *Roll initiative* button and INIT glows until
+  you do.
 - A row of pills: concentration (blue, × drops it), running effects (green),
   conditions (red, × removes; *+ Condition* adds), and the roll mode.
 - In initiative, or with a target picked, a combat card: the round, whose turn,

@@ -171,7 +171,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.27.1";
+  const APP_VERSION = "0.27.2";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1051,6 +1051,7 @@ const App = (() => {
 
     state.sheet = sheet;
     state.granted = null;
+    state.initRolled = false;
     state.sheetId = id;
     state.pending = [];
     state.creatureId = Store.boundCreatureIds(id)[0] || null;
@@ -1703,6 +1704,12 @@ const App = (() => {
   /** The combat card shows in initiative, or once a target is picked. */
   function renderCombatCard() {
     const inInit = Boolean(turnQueue?.items?.length);
+    // A fight in progress you haven't rolled for: say so, and make INIT obvious
+    const fighting = inInit && turnQueue.activeItemIndex >= 0;
+    if (!inInit) state.initRolled = false;
+    const needsRoll = Boolean(state.sheet) && fighting && !state.initRolled;
+    $("init-prompt").classList.toggle("hidden", !needsRoll);
+    $("roll-initiative").classList.toggle("needs-roll", needsRoll);
     const hasTarget = $("target-status").classList.contains("has-target");
     const show = Boolean(state.sheet) && (inInit || hasTarget);
     $("combat-card").classList.toggle("hidden", !show);
@@ -3998,6 +4005,8 @@ const App = (() => {
 
   async function rollInitiative(mode) {
     const s = state.sheet;
+    state.initRolled = true;
+    renderCombatCard();
     await doRoll({
       name: "Initiative",
       roll: `d20${DDB.signed(s.initiative)}`,
@@ -6240,6 +6249,7 @@ const App = (() => {
       Bestiary.runSearch($("bestiary-query").value);
     };
     $("roll-initiative").onclick = (ev) => rollInitiative(modeFromEvent(ev));
+    $("init-prompt").onclick = (ev) => rollInitiative(modeFromEvent(ev));
 
     $("effect-custom").onsubmit = (ev) => {
       ev.preventDefault();

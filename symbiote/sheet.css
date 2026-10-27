@@ -1389,6 +1389,18 @@ textarea {
 }
 .tile-btn { cursor: pointer; border-radius: 6px; padding: 2px 3px; }
 .tile-btn:hover { background: var(--card-2); }
+/* INIT rolls; it should look like it does */
+.tile-roll { border: 1px solid var(--accent); background: var(--accent-bg); padding: 2px 6px 1px; }
+.tile-roll:hover { background: var(--accent); }
+.tile-roll:hover .tile-value, .tile-roll:hover .tile-label, .tile-roll:hover .tile-hint { color: var(--bg); }
+.tile-roll:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tile-hint { font-size: 9px; line-height: 1; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+.tile-roll.needs-roll { box-shadow: 0 0 0 2px var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .tile-roll.needs-roll { animation: init-pulse 1.4s ease-in-out infinite; }
+  @keyframes init-pulse { 50% { box-shadow: 0 0 0 4px var(--accent-bg); } }
+}
+#init-prompt { margin-top: 6px; width: 100%; }
 .tile-label { font-size: 9px; color: var(--fg-dim); letter-spacing: 0.08em; }
 .tile-value { font-size: 20px; line-height: 1.15; color: var(--gold); font-weight: 600; font-variant-numeric: tabular-nums; }
 

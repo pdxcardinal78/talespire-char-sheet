@@ -92,7 +92,7 @@
   <div class="vitals-card card">
     <div class="tile"><span class="tile-label">AC</span><span id="v-ac" class="tile-value">—</span></div>
     <div class="tile"><span class="tile-label">SPD</span><span id="v-speed" class="tile-value">—</span></div>
-    <button id="roll-initiative" class="tile tile-btn" title="Roll initiative"><span class="tile-label">INIT</span><span id="v-init" class="tile-value">—</span></button>
+    <button id="roll-initiative" class="tile tile-btn tile-roll" title="Roll initiative"><span class="tile-label">INIT</span><span id="v-init" class="tile-value">—</span><span class="tile-hint">roll</span></button>
     <div class="hp-block">
       <div class="hp-label"><span>HP</span><span id="v-temp" class="hp-temp"></span></div>
       <div class="hp-row">
@@ -154,6 +154,8 @@
         <button id="clear-target" class="chip-btn hidden" title="Clear the target">×</button>
       </span>
     </div>
+    <!-- Shown when TaleSpire goes into initiative and you haven't rolled yet -->
+    <button id="init-prompt" class="btn btn-gold is-fill hidden" title="Roll d20 plus your initiative bonus">Roll initiative</button>
     <div id="turn-bar" class="turn-bar hidden" aria-label="This turn"></div>
   </div>
 
