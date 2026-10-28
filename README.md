@@ -1270,6 +1270,28 @@ monsters). When it can't land on its own, a card asks the GM:
 - **A damage roll without an attack** (a breath weapon's dice, say): *Apply it
   to <target>?*
 
+## Damage to a group
+
+The same damage on several creatures at once, for hits with no saving throw: a
+cave-in, a trap, a monster's sweep, an area spell that just deals damage. Lasso
+the minis on the board, then:
+
+- **From a roll.** A damage card in the Fights inbox (a player's hit) and a
+  monster's waiting roll both have *Apply to N lassoed* beside their usual
+  Apply.
+- **From nothing rolled.** The *Damage* box on the Party tab: what it was
+  (*Collapsing ceiling*), the amount (a number like `7`, or dice like `2d6+3`,
+  which are rolled in the tray first) and the damage type, then *Apply to N
+  lassoed*.
+
+Each creature takes it through its own defenses: a monster in the open
+encounter by its stat block, a player's mini by the resistances their sheet
+reported. Monsters in the encounter go through their rows (onto the mini with
+the bridge); players' minis are written with the bridge, or their panels apply
+it. Chat gets one line for the group, and one *Undo* in Recent events reverses
+all of it. A mini that's neither in the encounter nor a player's, without the
+bridge, is listed for applying by hand.
+
 ## Saving throws
 
 Ask for a save and the table runs it, ZeroGear style (`lib/saves.js`):

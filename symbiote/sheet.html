@@ -298,6 +298,27 @@
   </header>
   <div id="party-list" class="party-list"></div>
 
+  <!-- GM: the same damage on several minis (a trap, a cave-in, a sweep) -->
+  <form id="group-damage" class="group-damage card">
+    <div class="group-damage-head"><b>Damage</b> <span class="hint">the same hit on every lassoed mini, each through its own resistances</span></div>
+    <div class="row group-damage-row">
+      <input id="group-damage-label" type="text" placeholder="What, e.g. Cave-in" spellcheck="false">
+      <input id="group-damage-amount" type="text" placeholder="7 or 2d6" spellcheck="false" aria-label="Damage: a number, or dice to roll">
+      <select id="group-damage-type" aria-label="Damage type">
+        <option value="">Untyped</option>
+        <option value="acid">Acid</option><option value="bludgeoning">Bludgeoning</option><option value="cold">Cold</option>
+        <option value="fire">Fire</option><option value="force">Force</option><option value="lightning">Lightning</option>
+        <option value="necrotic">Necrotic</option><option value="piercing">Piercing</option><option value="poison">Poison</option>
+        <option value="psychic">Psychic</option><option value="radiant">Radiant</option><option value="slashing">Slashing</option>
+        <option value="thunder">Thunder</option>
+      </select>
+    </div>
+    <div class="row group-damage-row">
+      <button id="group-damage-apply" type="submit" class="btn btn-small btn-gold">Apply to lassoed</button>
+      <span id="group-damage-hint" class="hint"></span>
+    </div>
+  </form>
+
   <!-- GM: pair each 5e condition with one of TaleSpire's radial-menu statuses,
        once. Set up and then rarely touched, so it stays folded away. -->
   <details id="status-map-box" class="status-map-box">

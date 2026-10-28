@@ -171,7 +171,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.28.1";
+  const APP_VERSION = "0.29.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -2155,6 +2155,114 @@ const App = (() => {
     } catch (e) {
       toast(e.message, true);
     }
+  }
+
+  // --- damage to a group: the lassoed minis ----------------------------------
+
+  /** The minis lassoed on the board, with their names. */
+  async function lassoed() {
+    let ids = [];
+    try {
+      const sel = await TS.creatures.getSelectedCreatures();
+      ids = Array.isArray(sel) ? sel.map((x) => x?.id || x).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+    if (!ids.length) return [];
+    let infos = [];
+    try {
+      infos = await Board.creatureInfo(ids);
+    } catch {
+      /* names unknown */
+    }
+    return ids.map((id) => ({ id, name: infos.find((i) => i?.id === id)?.name || "Unnamed mini" }));
+  }
+
+  /** How many minis are lassoed right now, for button labels (kept by selection events). */
+  const lassoCount = () => (state.selection || []).length;
+
+  /**
+   * The same damage on several creatures, each through its own defenses: a
+   * monster in the open encounter by its stat block, a player's mini by what
+   * their sheet reported, this panel's own character directly. One undo
+   * covers the lot; chat gets one line.
+   */
+  async function damageGroup(label, parts, creatures, { source = null, modes = {} } = {}) {
+    if (!creatures?.length) return toast("Lasso the minis on the board first.", true);
+    const lines = [];
+    const notes = [];
+    await undoable(`${label} on ${creatures.length}`, async () => {
+      for (const cr of creatures) {
+        const combatant = (Encounters.current?.combatants || []).find((c) => c.creatureId && c.creatureId === cr.id) || null;
+        const def = combatant ? await defensesForCombatant(combatant) : Vitals.reportedFor(cr.id)?.defenses || null;
+        const { total, rows } = Damage.apply(parts, def, modes);
+        const changed = rows.filter((r) => r.mode !== "normal").map((r) => `${r.type} ${r.mode === "resist" ? "resisted" : r.mode === "vuln" ? "doubled" : "immune"}`);
+        const who = combatant?.label || cr.name;
+        if (total <= 0) {
+          lines.push(`${who} no damage${changed.length ? ` (${changed.join(", ")})` : ""}`);
+          continue;
+        }
+        if (combatant) {
+          await setCombatantHp(combatant, `-${total}`);
+        } else if (cr.id === state.creatureId && state.sheet) {
+          applyHp(-total);
+        } else if (Bridge.canWrite() || Vitals.reportedFor(cr.id)) {
+          // Written to the mini with the bridge; otherwise the player's panel applies it
+          await applyMonsterDamage({ id: cr.id, name: cr.name }, total, source || label, null, false, changed.join(", "));
+          continue; // it posted its own line
+        } else {
+          notes.push(`${who}: apply ${total} by hand`);
+          continue;
+        }
+        lines.push(`${who} ${total}${changed.length ? ` (${changed.join(", ")})` : ""}`);
+      }
+    });
+    if (lines.length) await postChat(`${Rolls.bold(label)}: ${escapeText(lines.join("; "))}`, null);
+    if (notes.length) toast(notes.join(". "), true);
+    else toast(`${label}: applied to ${creatures.length}.`);
+  }
+
+  /** Damage from a roll (party or monster) onto every lassoed mini. */
+  async function damageLassoed(label, parts, opts = {}) {
+    const creatures = await lassoed();
+    await damageGroup(label, parts, creatures, opts);
+    return creatures.length > 0;
+  }
+
+  /** The Party tab's Damage box: a flat number, or dice rolled in the tray first. */
+  async function groupDamageFromBox() {
+    const raw = $("group-damage-amount").value.trim().toLowerCase().replace(/\s+/g, "");
+    const type = $("group-damage-type").value || null;
+    const label = $("group-damage-label").value.trim() || "Damage";
+    const creatures = await lassoed();
+    if (!creatures.length) return toast("Lasso the minis on the board first.", true);
+    if (/^\d+$/.test(raw) && Number(raw) > 0) {
+      await damageGroup(label, [{ type, amount: Number(raw) }], creatures);
+      $("group-damage-amount").value = "";
+      return;
+    }
+    if (!/^\d*d\d+([+-]\d+)?$/.test(raw)) return toast("Type a number like 7, or dice like 2d6+3.", true);
+    try {
+      await Rolls.stage({
+        name: label,
+        damage: raw,
+        damageName: label,
+        damageType: type,
+        context: { kind: "groupDamage", creatures, label, damageType: type },
+      });
+      renderStaged();
+      $("group-damage-amount").value = "";
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  function renderGroupDamage() {
+    const n = lassoCount();
+    const btn = $("group-damage-apply");
+    if (!btn) return;
+    btn.textContent = n ? `Apply to ${n} lassoed` : "Apply to lassoed";
+    $("group-damage-hint").textContent = n ? "" : "Lasso the minis on the board first.";
   }
 
   /** Each creature's damage: full on a fail, half on a success, then its defenses. */
@@ -5854,6 +5962,13 @@ const App = (() => {
       }
     }
 
+    // The Party tab's group damage, rolled as dice
+    if (ctx.kind === "groupDamage" && summary.damage != null) {
+      const parts = summary.damageParts?.length ? summary.damageParts : [{ type: ctx.damageType || null, amount: summary.damage }];
+      await damageGroup(ctx.label, parts, ctx.creatures);
+      return;
+    }
+
     // The extra dice of a monster's crit, rolled after the attack landed
     if (ctx.kind === "critExtra") {
       const adj = afterDefenses(ctx.target?.id, (ctx.base || 0) + (summary.damage || 0), ctx.damageType);
@@ -6288,6 +6403,14 @@ const App = (() => {
           await applyMonsterDamage(p.target, adj.amount, ctx.source, ctx.creatureId, false, adj.note);
         });
       }
+      // Several creatures caught by it (a sweep, a falling rock): the same damage on each
+      if (s.damage != null) {
+        const n = lassoCount();
+        btn(n ? `Apply to ${n} lassoed` : "Apply to lassoed", "", async () => {
+          const parts = s.damageParts?.length ? s.damageParts : [{ type: ctx.damageType || null, amount: s.damage }];
+          if (await damageLassoed(ctx.source || s.name, parts, { source: ctx.source })) dropMonsterPrompt(p.id);
+        });
+      }
       btn("Dismiss", "btn-ghost", () => dropMonsterPrompt(p.id));
       card.appendChild(row);
       box.appendChild(card);
@@ -6300,6 +6423,12 @@ const App = (() => {
 
   function onSelectionChanged(creatures) {
     state.selection = creatures || [];
+    // Lasso counts on the group-damage buttons
+    if (state.isGM) {
+      renderGroupDamage();
+      if (monsterPrompts.length) renderMonsterPrompts();
+      if (Encounters.waiting) Encounters.render();
+    }
 
     // Clicking a mini that has a sheet linked brings that sheet up.
     if (state.selection.length === 1) {
@@ -6491,6 +6620,11 @@ const App = (() => {
       if (st.available && st.canGm) toast("Bridge connected: HP edits now go onto the minis.");
     });
     $("party-refresh").onclick = () => GM.refresh();
+    $("group-damage").onsubmit = (ev) => {
+      ev.preventDefault();
+      groupDamageFromBox();
+    };
+    renderGroupDamage();
 
     Bestiary.configure({
       results: $("bestiary-results"),
@@ -6551,6 +6685,11 @@ const App = (() => {
       onLink: linkCombatant,
       onRemove: removeCombatant,
       onApplyDamage: applyOfferedDamage,
+      lassoCount,
+      onApplyDamageGroup: async (entry) => {
+        const parts = entry.parts?.length ? entry.parts : [{ type: null, amount: entry.amount }];
+        if (await damageLassoed(`${entry.who}: ${entry.label || "damage"}`, parts, { source: `${entry.who}'s ${entry.label || "hit"}` })) Encounters.dismissDamage(entry.rollId);
+      },
       canRollInitiative: () => Bridge.canWrite(),
       modeText: () => (state.boardMode && state.boardMode !== "turn-based" ? MODE_TEXT[state.boardMode] : null),
       onRollInitiative: () => rollMonsterInitiative(),
@@ -6956,7 +7095,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ],
       },
       creatures: {
-        getSelectedCreatures: async () => (window.devSelected ? [{ id: window.devSelected }] : []),
+        getSelectedCreatures: async () => (Array.isArray(window.devSelected) ? window.devSelected.map((id) => ({ id })) : window.devSelected ? [{ id: window.devSelected }] : []),
         // Mirrors the real visibility rule: a player sees a name and nothing
         // else on a mini they don't own, so `stats` comes back empty.
         // Mirrors what TaleSpire actually does: a bare id string comes back

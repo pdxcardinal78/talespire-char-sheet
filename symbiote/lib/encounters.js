@@ -635,10 +635,20 @@ const Encounters = (() => {
         if (def?.qualified) box.appendChild(el("p", "hint", "Its stat block qualifies some defenses (nonmagical, silvered); check before applying."));
       }
 
+      const buttons = el("div", "damage-offer-buttons");
       const apply = el("button", "btn btn-small btn-gold is-fill", target ? `Apply ${result.total} to ${target.label}` : "Select a combatant");
       apply.disabled = !target;
       apply.onclick = () => deps.onApplyDamage(target, entry, entry.modes);
-      box.appendChild(apply);
+      buttons.appendChild(apply);
+      // An area spell's damage with no save: the same roll on every lassoed mini
+      if (deps.onApplyDamageGroup) {
+        const n = deps.lassoCount?.() || 0;
+        const group = el("button", "btn btn-small", n ? `Apply to ${n} lassoed` : "Apply to lassoed");
+        group.title = "The same damage on every mini lassoed on the board, each through its own resistances";
+        group.onclick = () => deps.onApplyDamageGroup(entry);
+        buttons.appendChild(group);
+      }
+      box.appendChild(buttons);
       host.appendChild(box);
     }
   }
