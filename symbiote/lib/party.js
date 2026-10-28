@@ -92,8 +92,8 @@ const Party = (() => {
 
   /** A player's panel telling the GM its mini's HP, max and temp pool. */
   /** `defenses` is Damage.pack's "r:fire;i:poison", so the GM can apply resistances. */
-  async function reportVitals(creatureId, hp, max, temp, defenses) {
-    await broadcast({ t: "vit", c: creatureId, h: hp, m: max, tp: temp, ...(defenses ? { df: defenses } : {}) });
+  async function reportVitals(creatureId, hp, max, temp, defenses, ac = null) {
+    await broadcast({ t: "vit", c: creatureId, h: hp, m: max, tp: temp, ...(defenses ? { df: defenses } : {}), ...(ac != null ? { a: ac } : {}) });
   }
 
   /** The GM telling a player's panel its new temp pool (no Temp HP stat in this campaign). */
@@ -249,7 +249,7 @@ const Party = (() => {
     } else if (msg.t === "ack" && handlers.onAck) {
       handlers.onAck({ effectId: msg.id, playerId: msg.pid, accepted: Boolean(msg.ok) });
     } else if (msg.t === "vit" && handlers.onVitals) {
-      handlers.onVitals({ creatureId: msg.c, hp: msg.h, max: msg.m, temp: msg.tp, defenses: msg.df ?? null });
+      handlers.onVitals({ creatureId: msg.c, hp: msg.h, max: msg.m, temp: msg.tp, defenses: msg.df ?? null, ac: msg.a ?? null });
     } else if (msg.t === "tmp" && handlers.onTemp) {
       handlers.onTemp({ creatureId: msg.c, temp: msg.tp });
     } else if (msg.t === "ini" && handlers.onInitiative) {

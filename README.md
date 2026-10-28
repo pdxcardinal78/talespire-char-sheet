@@ -1242,7 +1242,14 @@ and a card lists who's inside.
 
 The table rolls and a person calls hit or miss, as before. The exception is the
 GM's own turn: when a monster's stat block in Fights attacks a picked target
-whose AC the GM can read (an *AC* or *Armor Class* stat), the panel calls it.
+whose AC is known, the panel calls it.
+
+**Picking the target.** A monster's stat block opens with a *Target* line:
+*◎ Pick target*, then click the creature it's attacking. The line shows the
+target's AC and how far it is from this monster's mini. The AC comes from an
+*AC* or *Armor Class* stat on the mini, or, when the mini has none, from the
+player's own panel, which reports its AC (Shield and Shield of Faith included)
+along with its HP.
 
 - A natural 1 misses and a natural 20 crits; otherwise the total against AC.
 - A hit applies the damage rolled in the same throw. A crit rolls the extra
@@ -1252,8 +1259,16 @@ whose AC the GM can read (an *AC* or *Armor Class* stat), the panel calls it.
   (if it's open). Chat says what happened either way, e.g. *Goblin: Scimitar hits
   Doran for 7 (3 from temp HP) → 19/23*.
 
-Attacks against a target with no readable AC work as before: the result is
-posted and a person decides.
+A monster's roll never goes to the damage inbox (that's for the party's hits on
+monsters). When it can't land on its own, a card asks the GM:
+
+- **No target picked:** *Who is it attacking?* with *◎ Pick target*, or *On
+  <current target>*. Once picked, a known AC settles it; otherwise the next
+  question.
+- **Target with no known AC:** *Hit or miss?* *Hit* applies the damage as above;
+  *Miss* says so in chat.
+- **A damage roll without an attack** (a breath weapon's dice, say): *Apply it
+  to <target>?*
 
 ## Saving throws
 

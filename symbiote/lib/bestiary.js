@@ -710,6 +710,8 @@ const Bestiary = (() => {
     const m = current;
     host.appendChild(el("h2", "bestiary-title", ctx?.label && ctx.label !== m.name ? `${ctx.label} (${m.name})` : m.name));
     host.appendChild(el("p", "bestiary-meta", [m.meta, m.acNote].filter(Boolean).join(" · ")));
+    // Who its attacks go at (the GM's target), from this monster's mini
+    if (deps.targetBar) host.appendChild(deps.targetBar(ctx?.speakerId || null));
     host.appendChild(statRow(m));
     const hpPick = hpControls(m);
     if (hpPick) host.appendChild(hpPick);

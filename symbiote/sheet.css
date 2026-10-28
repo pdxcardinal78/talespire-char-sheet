@@ -1933,3 +1933,12 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 .adventure-form { gap: 6px; margin-bottom: 6px; }
 .adventure-form input { flex: 1; min-width: 0; }
 .encounter-move { font-size: 12px; max-width: 96px; padding: 2px 4px; background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* ---------- the GM's monsters: target and waiting rolls ---------- */
+.monster-target { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; padding: 6px 8px; border: 1px dashed var(--line); border-radius: var(--radius); font-size: 12px; }
+.monster-target-text { flex: 1 1 180px; min-width: 0; color: var(--fg-dim); }
+.monster-target-text b { color: var(--fg); }
+.monster-prompts { position: sticky; top: 30px; z-index: 22; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.monster-prompt { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--accent); background: var(--card); }
+.monster-prompt-text { font-size: 13px; }
+.monster-prompt-buttons { display: flex; flex-wrap: wrap; gap: 6px; }

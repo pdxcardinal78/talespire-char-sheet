@@ -171,7 +171,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.28.0";
+  const APP_VERSION = "0.28.1";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -1346,6 +1346,7 @@ const App = (() => {
 
     const acExtra = acBonus();
     $("v-ac").textContent = acExtra ? `${s.ac.value + acExtra}*` : s.ac.value;
+    reportVitals(); // sends only when HP, AC or defenses changed
     // Hovering shows the same itemisation D&D Beyond prints under Armor Class,
     // so a disagreement can be traced to the line that causes it.
     $("v-ac").title = breakdownText(
@@ -3398,6 +3399,7 @@ const App = (() => {
    * monster attacks still know about temp HP. Debounced: one report per burst.
    */
   let vitalsTimer = null;
+  let vitalsSent = null;
   function reportVitals() {
     if (!state.sheet || !state.creatureId) return;
     clearTimeout(vitalsTimer);
@@ -3405,8 +3407,17 @@ const App = (() => {
     vitalsTimer = setTimeout(() => {
       const s = state.sheet;
       if (!s || state.creatureId !== creatureId) return;
-      Party.reportVitals(creatureId, s.play.hp.current, effectiveMaxHp(s), s.play.hp.temp || 0, Damage.pack(Damage.defensesOf(s.defenses)))
-        .catch((e) => console.warn("[Spirekeeper] vitals report", e.message));
+      // AC too (with Shield, Shield of Faith and the like), so the GM's monster
+      // attacks can call hit or miss when the mini has no AC stat
+      const ac = Number.isFinite(s.ac?.value) ? s.ac.value + acBonus() : null;
+      const args = [creatureId, s.play.hp.current, effectiveMaxHp(s), s.play.hp.temp || 0, Damage.pack(Damage.defensesOf(s.defenses)), ac];
+      const sig = JSON.stringify(args);
+      if (sig === vitalsSent) return;
+      vitalsSent = sig;
+      Party.reportVitals(...args).catch((e) => {
+        vitalsSent = null;
+        console.warn("[Spirekeeper] vitals report", e.message);
+      });
     }, 300);
   }
 
@@ -3636,9 +3647,20 @@ const App = (() => {
   }
 
   /** A player's panel reported its vitals; as GM, keep the mini in step. */
-  async function onVitalsFromPlayer({ creatureId, hp, max, temp, defenses }) {
+  async function onVitalsFromPlayer({ creatureId, hp, max, temp, defenses, ac = null }) {
     if (!state.isGM || !creatureId) return;
-    Vitals.report(creatureId, { hp, max, temp, defenses: defenses != null ? Damage.unpack(defenses) : Vitals.reportedFor(creatureId)?.defenses || null });
+    const before = Vitals.reportedFor(creatureId);
+    Vitals.report(creatureId, {
+      hp, max, temp,
+      defenses: defenses != null ? Damage.unpack(defenses) : before?.defenses || null,
+      ac: ac ?? before?.ac ?? null,
+    });
+    // A target picked before its player said its AC learns it now
+    if (state.target?.id === creatureId && state.target.acFrom !== "board" && ac != null && state.target.ac !== ac) {
+      state.target.ac = ac;
+      state.target.acFrom = "player";
+      refreshMonsterTarget();
+    }
     GM.refresh();
     if (!Bridge.canWrite()) return;
     let info;
@@ -5849,6 +5871,13 @@ const App = (() => {
       await resolveMonsterAttack(summary, verdict);
       return;
     }
+    // A monster's attack or damage that can't land on its own: no target yet,
+    // or a target whose AC nobody knows. Ask the GM; never offer it to the
+    // monsters' own damage inbox, which is for the party's hits on them.
+    if (state.isGM && ctx.monster && (ctx.kind === "attack" || (ctx.kind === "damage" && summary.damage != null))) {
+      queueMonsterPrompt(summary, target?.id ? { id: target.id, name: target.name, ac: target.ac } : null);
+      return;
+    }
 
     // A GM's own damage counts too. Rolling a player's attack for them, or a
     // monster's, is the same number needing the same target — and the roll
@@ -6095,12 +6124,22 @@ const App = (() => {
       }
 
       const acStat = (info.stats || []).find((st) => /^ac$|armou?r/i.test(st.name || ""));
-      const ac = acStat && Number.isFinite(acStat.value) ? acStat.value : null;
+      const boardAc = acStat && Number.isFinite(acStat.value) ? acStat.value : null;
+      // No AC stat on the mini: the AC its player's panel reported, if any
+      const reportedAc = boardAc == null && state.isGM ? Vitals.reportedFor(creatureId)?.ac ?? null : null;
+      const ac = boardAc ?? reportedAc;
 
-      state.target = { id: creatureId, name, ac, distance: null };
+      state.target = { id: creatureId, name, ac, acFrom: boardAc != null ? "board" : reportedAc != null ? "player" : null, distance: null };
 
       setTargetStatus(targetText(), true);
       refreshTargetDistance();
+      refreshMonsterTarget();
+      // A monster's roll was waiting for this target
+      if (state.pendingHitPick) {
+        const id = state.pendingHitPick;
+        state.pendingHitPick = null;
+        await targetMonsterPrompt(id, state.target);
+      }
     } catch (e) {
       setTargetStatus("No target", false);
       toast(`Targeting failed: ${e.message}`, true);
@@ -6111,6 +6150,7 @@ const App = (() => {
   function onPickingEnded(reason) {
     state.pickingSpeaker = false;
     state.linkingCombatant = null;
+    state.pendingHitPick = null;
     if (state.target) return; // an earlier target still stands
     setTargetStatus("No target", false);
     if (reason) toast(reason);
@@ -6119,6 +6159,139 @@ const App = (() => {
   function clearTarget() {
     state.target = null;
     setTargetStatus("No target", false);
+    refreshMonsterTarget();
+  }
+
+  // --- the GM's monsters: who they're attacking -------------------------------
+
+  /**
+   * The Target line at the top of a monster's stat block: who its attacks go
+   * at, their AC (from the mini, or from their player's panel), and how far
+   * they are from this monster's mini.
+   */
+  function monsterTargetBar(monsterCreatureId) {
+    const bar = document.createElement("div");
+    bar.className = "monster-target";
+    const t = state.target;
+    const text = document.createElement("span");
+    text.className = "monster-target-text";
+    text.innerHTML = t
+      ? `<b>Target:</b> ${escapeHtml(t.name)} · ${t.ac != null ? `AC ${t.ac}${t.acFrom === "player" ? " (from their sheet)" : ""}` : "AC unknown, you'll call hit or miss"}<span class="monster-target-dist"></span>`
+      : `<b>No target.</b> Pick the creature this monster attacks, and hits land on it.`;
+    bar.appendChild(text);
+    const pick = document.createElement("button");
+    pick.className = `btn btn-small ${t ? "btn-ghost" : "btn-primary"}`;
+    pick.textContent = t ? "Change" : "◎ Pick target";
+    pick.title = "Click a mini on the board; Esc or right-click stops picking";
+    pick.onclick = () => pickTarget();
+    bar.appendChild(pick);
+    if (t) {
+      const x = document.createElement("button");
+      x.className = "chip-btn";
+      x.textContent = "×";
+      x.title = "Clear the target";
+      x.onclick = clearTarget;
+      bar.appendChild(x);
+    }
+    // Distance from this monster's mini, edge to edge
+    if (t && monsterCreatureId) {
+      Board.creatureInfo([monsterCreatureId, t.id]).then(([me, them]) => {
+        const at = (i) => (i?.position ? { ...i.position, size: i.morphs?.[i.activeMorphIndex ?? 0]?.scale || 1 } : null);
+        const d = Range.distanceFt(at(me), at(them));
+        const slot = bar.querySelector(".monster-target-dist");
+        if (slot && d != null) slot.textContent = ` · ${d} ft away`;
+      }).catch(() => {});
+    }
+    return bar;
+  }
+
+  /** Redraw the open stat block's Target line after the target changed. */
+  function refreshMonsterTarget() {
+    if (Bestiary.current) Bestiary.renderSheet();
+  }
+
+  // A monster's roll that needs the GM: a target to land on, or a hit/miss call
+  const monsterPrompts = []; // { id, summary, target, need: "target" | "verdict" | "apply" }
+
+  function queueMonsterPrompt(summary, target) {
+    const ctx = summary.context;
+    const need = !target?.id ? "target" : ctx.kind === "attack" ? "verdict" : "apply";
+    monsterPrompts.unshift({ id: `mp${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, summary, target, need });
+    monsterPrompts.splice(3); // the newest three
+    renderMonsterPrompts();
+  }
+
+  function dropMonsterPrompt(id) {
+    const i = monsterPrompts.findIndex((p) => p.id === id);
+    if (i !== -1) monsterPrompts.splice(i, 1);
+    renderMonsterPrompts();
+  }
+
+  /** A target was picked for a waiting roll: call the hit if its AC is known, else ask. */
+  async function targetMonsterPrompt(id, target) {
+    const p = monsterPrompts.find((x) => x.id === id);
+    if (!p || !target?.id) return;
+    p.target = { id: target.id, name: target.name, ac: target.ac };
+    const s = p.summary;
+    if (s.context.kind === "attack" && target.ac != null && s.total != null) {
+      const hit = s.natural === 20 || (s.natural !== 1 && s.total >= target.ac);
+      dropMonsterPrompt(id);
+      await postChat(`${Rolls.bold(s.context.source)} ${escapeText(String(s.total))} ${Rolls.bold(hit ? "HIT" : "MISS")} ${Rolls.dim(`vs ${escapeText(target.name)} AC ${target.ac}`)}`, s.context.creatureId || null);
+      return landMonsterHit(s, p.target, hit);
+    }
+    p.need = s.context.kind === "attack" ? "verdict" : "apply";
+    renderMonsterPrompts();
+  }
+
+  async function landMonsterHit(summary, target, hit) {
+    summary.context.target = target;
+    await resolveMonsterAttack(summary, hit);
+  }
+
+  function renderMonsterPrompts() {
+    const box = $("monster-prompts");
+    box.replaceChildren();
+    box.classList.toggle("hidden", !monsterPrompts.length);
+    for (const p of monsterPrompts) {
+      const s = p.summary;
+      const ctx = s.context;
+      const card = document.createElement("div");
+      card.className = "monster-prompt card";
+      const dmg = s.damage != null ? `${s.damage}${ctx.damageType ? ` ${ctx.damageType}` : ""} damage` : null;
+      const rolled = [ctx.kind === "attack" && s.total != null ? `${s.total} to hit${s.natural === 20 ? " (natural 20)" : s.natural === 1 ? " (natural 1)" : ""}` : null, dmg].filter(Boolean).join(", ");
+      const question = p.need === "target"
+        ? "Who is it attacking?"
+        : p.need === "verdict" ? `vs ${p.target.name}${p.target.ac != null ? ` (AC ${p.target.ac})` : ""}. Hit or miss?` : `Apply it to ${p.target.name}?`;
+      card.innerHTML = `<span class="monster-prompt-text"><b>${escapeHtml(ctx.source || s.name)}</b> · ${escapeHtml(rolled)} · ${escapeHtml(question)}</span>`;
+      const row = document.createElement("div");
+      row.className = "monster-prompt-buttons";
+      const btn = (label, cls, fn) => {
+        const b = document.createElement("button");
+        b.className = `btn btn-small ${cls}`;
+        b.textContent = label;
+        b.onclick = fn;
+        row.appendChild(b);
+      };
+      if (p.need === "target") {
+        btn("◎ Pick target", "btn-gold is-fill", () => {
+          state.pendingHitPick = p.id;
+          pickTarget();
+        });
+        if (state.target) btn(`On ${state.target.name}`, "", () => targetMonsterPrompt(p.id, state.target));
+      } else if (p.need === "verdict") {
+        btn(`Hit${dmg ? `: ${s.damage} to ${p.target.name}` : ""}`, "btn-gold is-fill", () => { dropMonsterPrompt(p.id); landMonsterHit(s, p.target, true); });
+        btn("Miss", "", () => { dropMonsterPrompt(p.id); postChat(`${Rolls.bold(ctx.source)} ${Rolls.dim(`misses ${escapeText(p.target.name)}`)}`, ctx.creatureId || null); });
+      } else {
+        btn(`Apply ${s.damage} to ${p.target.name}`, "btn-gold is-fill", async () => {
+          dropMonsterPrompt(p.id);
+          const adj = afterDefenses(p.target.id, s.damage, ctx.damageType);
+          await applyMonsterDamage(p.target, adj.amount, ctx.source, ctx.creatureId, false, adj.note);
+        });
+      }
+      btn("Dismiss", "btn-ghost", () => dropMonsterPrompt(p.id));
+      card.appendChild(row);
+      box.appendChild(card);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -6329,6 +6502,7 @@ const App = (() => {
       },
       onAnnounce: monsterAnnounce,
       onAdd: addMonsterRow,
+      targetBar: (speakerId) => monsterTargetBar(speakerId),
       spellForm: (name, existing, done) => SpellForm.build({
         name, existing,
         onSave: async (rec) => { await saveCustomSpell(rec); done(); toast(`${rec.name} saved for every monster and character that has it.`); },
@@ -6824,7 +6998,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (outcome === "tile" || outcome === "prop") {
               return onPickingEvent({ kind: "pickingCompleted", payload: { id: "dev", kindOfPicked: outcome, idOfPicked: "x" } });
             }
-            const idOfPicked = outcome === "foreign" ? "dev-foreign" : outcome === "missing" ? "dev-missing" : "dev-owned";
+            // "id:<creature>" picks that exact mini
+            const idOfPicked = outcome.startsWith("id:") ? outcome.slice(3) : outcome === "foreign" ? "dev-foreign" : outcome === "missing" ? "dev-missing" : "dev-owned";
             onPickingEvent({ kind: "pickingCompleted", payload: { id: "dev", kindOfPicked: "creature", idOfPicked } });
           }, 300);
           return "dev-pick-1";
