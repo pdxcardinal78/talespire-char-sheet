@@ -304,9 +304,13 @@ const Encounters = (() => {
     host.replaceChildren();
 
     if (!encounters.length) {
-      host.appendChild(el("p", "hint", "No encounters yet. Name one above and press Create, then add monsters to it."));
+      const adv = deps.adventureName?.();
+      host.appendChild(el("p", "hint", adv
+        ? `No encounters in ${adv} yet. Name one above and press Create, then add monsters to it.`
+        : "No encounters yet. Name one above and press Create, then add monsters to it."));
       return;
     }
+    const adventures = deps.adventures?.() || [];
 
     for (const enc of encounters) {
       const row = el("div", `encounter-row${current && enc.id === current.id ? " is-open" : ""}`);
@@ -314,6 +318,27 @@ const Encounters = (() => {
       name.innerHTML = `<span>${escape(enc.name)}</span><span class="sub">${enc.combatants.length} combatants</span>`;
       name.onclick = () => deps.onOpen(enc.id);
       row.appendChild(name);
+
+      // Move to another adventure
+      if (adventures.length > 1 && deps.onMoveEncounter) {
+        const move = document.createElement("select");
+        move.className = "encounter-move";
+        move.setAttribute("aria-label", `Move ${enc.name} to another adventure`);
+        move.title = "Move to another adventure";
+        const first = document.createElement("option");
+        first.value = "";
+        first.textContent = "Move…";
+        move.appendChild(first);
+        for (const a of adventures) {
+          if (a.id === enc.adventureId) continue;
+          const o = document.createElement("option");
+          o.value = a.id;
+          o.textContent = a.archived ? `${a.name} (archived)` : a.name;
+          move.appendChild(o);
+        }
+        move.onchange = () => move.value && deps.onMoveEncounter(enc.id, move.value);
+        row.appendChild(move);
+      }
 
       const del = el("button", "btn btn-small btn-ghost", "Delete");
       del.onclick = () => deps.onDelete(enc.id);

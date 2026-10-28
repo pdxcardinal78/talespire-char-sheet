@@ -314,6 +314,23 @@
     </div>
   </header>
 
+  <!-- Adventures: folders of encounters within the campaign -->
+  <div class="adventure-bar">
+    <label class="adventure-label" for="adventure-pick">Adventure</label>
+    <select id="adventure-pick" aria-label="Adventure"></select>
+    <button id="adventure-menu-btn" class="btn btn-small btn-ghost" aria-haspopup="true" aria-expanded="false" aria-controls="adventure-menu" title="Rename, archive or delete this adventure">⋯</button>
+  </div>
+  <div id="adventure-menu" class="adventure-menu hidden" role="menu">
+    <button id="adventure-rename" class="btn btn-small btn-ghost" role="menuitem">Rename</button>
+    <button id="adventure-archive" class="btn btn-small btn-ghost" role="menuitem">Archive</button>
+    <button id="adventure-delete" class="btn btn-small btn-ghost" role="menuitem">Delete…</button>
+  </div>
+  <form id="adventure-form" class="row adventure-form hidden">
+    <input id="adventure-name" type="text" placeholder="Adventure name, e.g. Greymere" spellcheck="false">
+    <button type="submit" id="adventure-save" class="btn btn-small btn-primary">Create</button>
+    <button type="button" id="adventure-cancel" class="btn btn-small btn-ghost">Cancel</button>
+  </form>
+
   <div class="row">
     <input id="encounter-name" type="text" placeholder="New encounter name" spellcheck="false">
     <button id="encounter-new" class="btn btn-small">Create</button>

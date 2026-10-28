@@ -171,7 +171,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.27.2";
+  const APP_VERSION = "0.28.0";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -385,8 +385,164 @@ const App = (() => {
     initiativePoll = setInterval(pollTurns, 3000);
   }
 
+  // --- adventures: folders of encounters ------------------------------------
+
+  /** The adventure whose encounters Fights is showing; remembered per computer. */
+  function currentAdventureId() {
+    const all = Store.listAdventures();
+    if (!all.length) return null;
+    let id = state.adventureId;
+    if (!id) {
+      try { id = localStorage.getItem("sheetbridge:adventure"); } catch { /* none */ }
+    }
+    if (!all.some((a) => a.id === id)) id = (all.find((a) => !a.archived) || all[0]).id;
+    state.adventureId = id;
+    return id;
+  }
+
+  function chooseAdventure(id) {
+    state.adventureId = id;
+    try { localStorage.setItem("sheetbridge:adventure", id || ""); } catch { /* per-computer nicety */ }
+    // An open encounter from another adventure would look like it belongs here
+    if (Encounters.current && Encounters.current.adventureId !== id) Encounters.setCurrent(null);
+    adventureDeleteArmed = false;
+    toggleAdventureMenu(false);
+    renderEncounters();
+  }
+
+  let adventureFormMode = null; // "new" | "rename"
+  let adventureDeleteArmed = false;
+
+  function renderAdventurePicker() {
+    const pick = $("adventure-pick");
+    pick.replaceChildren();
+    const all = Store.listAdventures();
+    const cur = currentAdventureId();
+    const option = (value, text) => {
+      const o = document.createElement("option");
+      o.value = value;
+      o.textContent = text;
+      return o;
+    };
+    const label = (a) => `${a.name} · ${Store.encountersIn(a.id).length}`;
+    if (!all.length) {
+      const none = option("", "No adventures yet");
+      none.disabled = true;
+      pick.appendChild(none);
+    }
+    for (const a of all.filter((x) => !x.archived)) pick.appendChild(option(a.id, label(a)));
+    const archived = all.filter((x) => x.archived);
+    if (archived.length) {
+      const group = document.createElement("optgroup");
+      group.label = `Archived (${archived.length})`;
+      for (const a of archived) group.appendChild(option(a.id, label(a)));
+      pick.appendChild(group);
+    }
+    pick.appendChild(option("__new", "+ New adventure…"));
+    pick.value = cur || "";
+    const adv = cur ? Store.getAdventure(cur) : null;
+    $("adventure-menu-btn").disabled = !adv;
+    $("adventure-archive").textContent = adv?.archived ? "Restore" : "Archive";
+    $("adventure-delete").textContent = adventureDeleteArmed
+      ? (() => {
+          const n = Store.encountersIn(cur).length;
+          return n ? `Delete it and its ${n} ${n === 1 ? "encounter" : "encounters"}? Tap again` : "Delete it? Tap again";
+        })()
+      : "Delete…";
+    $("encounter-name").placeholder = adv ? `New encounter in ${adv.name}` : "New encounter name";
+  }
+
+  function toggleAdventureMenu(open) {
+    const menu = $("adventure-menu");
+    const show = open ?? menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !show);
+    $("adventure-menu-btn").setAttribute("aria-expanded", show ? "true" : "false");
+    if (!show) adventureDeleteArmed = false;
+  }
+
+  function openAdventureForm(mode) {
+    adventureFormMode = mode;
+    toggleAdventureMenu(false);
+    const adv = Store.getAdventure(currentAdventureId());
+    $("adventure-form").classList.remove("hidden");
+    $("adventure-name").value = mode === "rename" ? adv?.name || "" : "";
+    $("adventure-save").textContent = mode === "rename" ? "Rename" : "Create";
+    $("adventure-name").focus();
+  }
+
+  function closeAdventureForm() {
+    adventureFormMode = null;
+    $("adventure-form").classList.add("hidden");
+    renderAdventurePicker();
+  }
+
+  async function submitAdventureForm() {
+    const name = $("adventure-name").value.trim();
+    if (!name) return toast("Give the adventure a name.", true);
+    if (adventureFormMode === "rename") {
+      const adv = Store.getAdventure(currentAdventureId());
+      if (adv) {
+        adv.name = name;
+        await Store.saveAdventure(adv);
+      }
+      closeAdventureForm();
+      return renderEncounters();
+    }
+    const id = await Store.saveAdventure({ name });
+    closeAdventureForm();
+    chooseAdventure(id);
+    toast(`${name} created. New encounters go into it.`);
+  }
+
+  async function toggleArchiveAdventure() {
+    const adv = Store.getAdventure(currentAdventureId());
+    if (!adv) return;
+    adv.archived = !adv.archived;
+    await Store.saveAdventure(adv);
+    toggleAdventureMenu(false);
+    if (adv.archived) {
+      toast(`${adv.name} archived. It's under Archived in the Adventure picker.`);
+      const next = Store.listAdventures().find((a) => !a.archived);
+      if (next) return chooseAdventure(next.id);
+    } else {
+      toast(`${adv.name} restored.`);
+    }
+    renderEncounters();
+  }
+
+  async function deleteCurrentAdventure() {
+    const adv = Store.getAdventure(currentAdventureId());
+    if (!adv) return;
+    // Two taps, because it takes its encounters with it
+    if (!adventureDeleteArmed) {
+      adventureDeleteArmed = true;
+      return renderAdventurePicker();
+    }
+    const n = Store.encountersIn(adv.id).length;
+    if (Encounters.current?.adventureId === adv.id) Encounters.setCurrent(null);
+    await Store.deleteAdventure(adv.id);
+    state.adventureId = null;
+    adventureDeleteArmed = false;
+    toggleAdventureMenu(false);
+    toast(`${adv.name} deleted, with ${n} ${n === 1 ? "encounter" : "encounters"}.`);
+    chooseAdventure(currentAdventureId());
+  }
+
+  /** Move an encounter to another adventure. */
+  async function moveEncounter(id, adventureId) {
+    const enc = Store.getEncounter(id);
+    const to = Store.getAdventure(adventureId);
+    if (!enc || !to || enc.adventureId === adventureId) return;
+    enc.adventureId = adventureId;
+    await Store.saveEncounter(enc);
+    if (Encounters.current?.id === id) Encounters.setCurrent(null);
+    toast(`${enc.name} moved to ${to.name}.`);
+    renderEncounters();
+  }
+
   function renderEncounters() {
-    Encounters.renderList(Store.listEncounters());
+    renderAdventurePicker();
+    Encounters.renderList(Store.encountersIn(currentAdventureId()));
     Encounters.render();
     renderEncounterMeta();
   }
@@ -394,7 +550,10 @@ const App = (() => {
   /** The Fights header: the open encounter, and which mode TaleSpire is in. */
   function renderEncounterMeta() {
     const open = Encounters.current;
-    const parts = [open ? `${open.name} · ${open.combatants.length} combatants` : `${Store.listEncounters().length} saved`];
+    const adv = Store.getAdventure(currentAdventureId());
+    const parts = [open
+      ? `${open.name} · ${open.combatants.length} combatants`
+      : adv ? `${adv.name} · ${Store.encountersIn(adv.id).length} encounters` : "No adventures yet"];
     if (state.boardMode) parts.push(MODE_TEXT[state.boardMode] || state.boardMode);
     $("encounters-meta").textContent = parts.join(" · ");
   }
@@ -413,7 +572,13 @@ const App = (() => {
   async function createEncounter() {
     const name = $("encounter-name").value.trim();
     if (!name) return toast("Give the encounter a name first.", true);
-    const encounter = { id: null, name, combatants: [] };
+    // Into the chosen adventure; with none yet, into "Unsorted"
+    let adventureId = currentAdventureId();
+    if (!adventureId) {
+      adventureId = await Store.saveAdventure({ name: "Unsorted" });
+      state.adventureId = adventureId;
+    }
+    const encounter = { id: null, name, combatants: [], adventureId };
     const id = await Store.saveEncounter(encounter);
     $("encounter-name").value = "";
     openEncounter(id);
@@ -423,6 +588,7 @@ const App = (() => {
     const enc = Store.getEncounter(id);
     if (!enc) return;
     if (!enc.combatants) enc.combatants = [];
+    if (enc.adventureId) state.adventureId = enc.adventureId;
     Encounters.setCurrent(enc);
     renderEncounters();
     refreshBoardHp();
@@ -6201,6 +6367,9 @@ const App = (() => {
         if (Encounters.current?.id === id) Encounters.setCurrent(null);
         renderEncounters();
       },
+      adventures: () => Store.listAdventures(),
+      adventureName: () => Store.getAdventure(currentAdventureId())?.name || null,
+      onMoveEncounter: moveEncounter,
       onOpenMonster: openCombatantStatblock,
       onSetHp: setCombatantHp,
       onSetTemp: setCombatantTemp,
@@ -6243,6 +6412,25 @@ const App = (() => {
       onError: (m) => toast(m, true),
     });
     $("encounter-new").onclick = createEncounter;
+    $("encounter-name").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") createEncounter();
+    });
+    $("adventure-pick").onchange = (ev) => {
+      if (ev.target.value === "__new") {
+        ev.target.value = currentAdventureId() || "";
+        return openAdventureForm("new");
+      }
+      chooseAdventure(ev.target.value);
+    };
+    $("adventure-menu-btn").onclick = () => toggleAdventureMenu();
+    $("adventure-rename").onclick = () => openAdventureForm("rename");
+    $("adventure-archive").onclick = toggleArchiveAdventure;
+    $("adventure-delete").onclick = deleteCurrentAdventure;
+    $("adventure-form").onsubmit = (ev) => {
+      ev.preventDefault();
+      submitAdventureForm();
+    };
+    $("adventure-cancel").onclick = closeAdventureForm;
 
     $("bestiary-online").onchange = (ev) => {
       Bestiary.setOnline(ev.target.checked);

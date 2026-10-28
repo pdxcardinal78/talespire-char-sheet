@@ -802,6 +802,24 @@ takes changes — they just last until the panel closes, and the panel says so.
 
 ## GM: encounters and initiative
 
+### Adventures
+
+Encounters are grouped into **adventures**, folders within the campaign, so a
+West Marches game running dozens of adventures keeps each one's fights
+together. The **Adventure** picker at the top of Fights chooses which one's
+encounters are listed, and *Create* adds new encounters to it. *+ New
+adventure…* at the bottom of the picker makes one; **⋯** renames, archives or
+deletes the chosen adventure. *Archive* moves a finished adventure into an
+*Archived* group in the picker, encounters kept; *Restore* brings it back.
+*Delete* takes two taps, because it deletes the adventure's encounters too.
+Each encounter has *Move…* to put it in another adventure.
+
+Adventures are stored per campaign, with the encounters, because a linked
+monster points at a mini on that campaign's boards. Encounters saved before
+0.28 are put in an adventure called *Unsorted* on first load. The chosen
+adventure is remembered per computer.
+
+
 While Fights is open the turn order stays current without redrawing for
 nothing. With the bridge (0.7.1 or later), the panel asks which of TaleSpire's
 three modes the board is in, shows it in the Fights header (Exploration,

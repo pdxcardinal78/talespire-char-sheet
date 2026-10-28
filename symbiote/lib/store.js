@@ -16,7 +16,7 @@
 
 const Store = (() => {
   const EMPTY_LIBRARY = { version: 1, sheets: {}, statusMap: {}, conditionMap: {}, statusNames: {}, customSpells: {} };
-  const EMPTY_BINDINGS = { version: 1, bindings: {}, statNamesOffered: false, encounters: {}, statusMap: {} };
+  const EMPTY_BINDINGS = { version: 1, bindings: {}, statNamesOffered: false, encounters: {}, adventures: {}, statusMap: {} };
 
   let library = null; // { version, sheets: { [sheetId]: sheet } }
   let bindings = null; // { version, bindings: { [creatureId]: sheetId } }
@@ -150,6 +150,15 @@ const Store = (() => {
     if (!library.sheets) library.sheets = {};
     if (!bindings.bindings) bindings.bindings = {};
     if (!bindings.encounters) bindings.encounters = {};
+    if (!bindings.adventures) bindings.adventures = {};
+    // 0.28: encounters belong to adventures. Any from before go in "Unsorted".
+    const loose = Object.values(bindings.encounters).filter((e) => !e.adventureId || !bindings.adventures[e.adventureId]);
+    if (loose.length) {
+      const unsorted = Object.values(bindings.adventures).find((a) => a.name === "Unsorted") || newAdventure("Unsorted");
+      bindings.adventures[unsorted.id] = unsorted;
+      for (const e of loose) e.adventureId = unsorted.id;
+      await writeBlob("campaign", bindings);
+    }
     if (!bindings.statusMap) bindings.statusMap = {};
     if (!library.statusMap) library.statusMap = {};
     if (!library.statusNames) library.statusNames = {};
@@ -304,6 +313,37 @@ const Store = (() => {
     await writeBlob("campaign", bindings);
   }
 
+  // --- adventures ------------------------------------------------------------
+  //
+  // Folders of encounters within the campaign: a West Marches game runs dozens
+  // of adventures in one campaign, each with its own handful of fights. An
+  // archived adventure keeps its encounters but leaves the main list.
+
+  function newAdventure(name) {
+    return { id: `adv-${Math.random().toString(36).slice(2, 9)}`, name: String(name || "").trim() || "Adventure", archived: false, createdAt: Date.now() };
+  }
+
+  const listAdventures = () =>
+    Object.values(bindings.adventures || {}).sort((a, b) => (a.name || "").localeCompare(b.name || "", undefined, { numeric: true }));
+
+  const getAdventure = (id) => (bindings.adventures || {})[id] || null;
+
+  const encountersIn = (adventureId) => listEncounters().filter((e) => e.adventureId === adventureId);
+
+  async function saveAdventure(adventure) {
+    const a = adventure.id ? adventure : { ...newAdventure(adventure.name), ...adventure, id: newAdventure().id };
+    bindings.adventures[a.id] = a;
+    await writeBlob("campaign", bindings);
+    return a.id;
+  }
+
+  /** Delete an adventure and every encounter in it. */
+  async function deleteAdventure(id) {
+    for (const e of encountersIn(id)) delete bindings.encounters[e.id];
+    delete bindings.adventures[id];
+    await writeBlob("campaign", bindings);
+  }
+
   async function bind(creatureId, id) {
     bindings.bindings[creatureId] = id;
     await writeBlob("campaign", bindings);
@@ -374,6 +414,11 @@ const Store = (() => {
     getEncounter,
     saveEncounter,
     deleteEncounter,
+    listAdventures,
+    getAdventure,
+    encountersIn,
+    saveAdventure,
+    deleteAdventure,
     deleteSheet,
     boundSheetId,
     boundCreatureIds,
