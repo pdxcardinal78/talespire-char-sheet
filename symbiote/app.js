@@ -992,6 +992,45 @@ const App = (() => {
     await saveCurrentEncounter();
   }
 
+  /**
+   * The monster's numbers onto the mini it was just linked to: the statblock
+   * is what's being run, the mini only shows it. Hit points always; AC when
+   * the campaign has an AC stat. Without the bridge the mini keeps its own.
+   */
+  async function pushMonsterToMini(c) {
+    if (!c.creatureId || !Bridge.canWrite()) return;
+    if (Number.isFinite(c.maxHp) && c.maxHp > 0) {
+      const r = await Bridge.setHp(c.creatureId, c.hp ?? c.maxHp, c.maxHp, { quiet: true });
+      if (!r.ok) toast(`Couldn't put ${c.label}'s HP on its mini (${r.error}).`, true);
+    }
+    if (Number.isFinite(c.ac)) {
+      try {
+        const info = await Board.oneCreature(c.creatureId);
+        const acStat = Vitals.findStat(info?.stats, Vitals.AC_NAME);
+        if (acStat && acStat.value !== c.ac) await Bridge.setStat(c.creatureId, acStat.index, c.ac, Math.max(c.ac, acStat.max || 0));
+      } catch {
+        /* no AC slot read; HP is what matters */
+      }
+    }
+  }
+
+  /** Hold a monster out of initiative, or bring it (and the rest of its held kind) in. */
+  async function holdCombatant(c) {
+    const enc = Encounters.current;
+    if (!c.held) {
+      c.held = true;
+      if (c.creatureId) initValues.delete(c.creatureId);
+      await saveCurrentEncounter();
+      return toast(`${c.label} held. It stays out of initiative until you click Bring in.`);
+    }
+    const group = enc.combatants.filter((x) => x.held && x.slug === c.slug);
+    for (const x of group) x.held = false;
+    await saveCurrentEncounter();
+    toast(`${group.map((x) => x.label).join(", ")} joining the fight.`);
+    // In a fight they roll and slot in now; outside one, Roll monster initiative picks them up later
+    if (!state.boardMode || state.boardMode === "turn-based" || (await Bridge.initiative())?.items?.length) await rollMonsterInitiative(group);
+  }
+
   async function linkCombatant(combatant) {
     if (combatant.creatureId) {
       combatant.creatureId = null;
@@ -1007,6 +1046,7 @@ const App = (() => {
       combatant.creatureId = sel[0].id;
       combatant.creatureName = sel[0].name === "Unnamed mini" ? null : sel[0].name;
       await saveCurrentEncounter();
+      await pushMonsterToMini(combatant);
       await refreshBoardHp();
       return toast(`${combatant.label} linked to ${sel[0].name} #${Encounters.shortId(sel[0].id)}.`);
     }
@@ -1030,10 +1070,14 @@ const App = (() => {
     const norm = (t) => String(t || "").toLowerCase().replace(/\s*\d+$/, "").trim();
     const done = [];
     // Name matches first, so lassoed ghouls and wraiths sort themselves out
-    for (const pass of ["name", "any"]) {
+    // A mini named Ghoul 2 goes to the monster labelled Ghoul 2, then names, then order
+    const exact = (t) => String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
+    for (const pass of ["label", "name", "any"]) {
       for (const m of fresh) {
         if (m.linked) continue;
-        const i = open.findIndex((c) => pass === "any" || (norm(m.name) && (norm(m.name).includes(norm(c.name)) || norm(c.name).includes(norm(m.name)))));
+        const i = open.findIndex((c) => pass === "any"
+          || (pass === "label" && exact(m.name) === exact(c.label))
+          || (pass === "name" && norm(m.name) && (norm(m.name).includes(norm(c.name)) || norm(c.name).includes(norm(m.name)))));
         if (i === -1) continue;
         const c = open.splice(i, 1)[0];
         c.creatureId = m.id;
@@ -1046,6 +1090,7 @@ const App = (() => {
       return toast(fresh.length ? "Every monster here is already linked." : "Those minis are already linked to monsters here.", true);
     }
     await saveCurrentEncounter();
+    for (const c of enc.combatants) if (c.creatureId && fresh.some((m) => m.id === c.creatureId)) await pushMonsterToMini(c);
     await refreshBoardHp();
     const skipped = sel.length - done.length;
     toast(`Linked ${done.join(", ")}.${skipped ? ` ${skipped} lassoed ${skipped === 1 ? "mini was" : "minis were"} already linked or had no monster left.` : ""}`);
@@ -4428,6 +4473,11 @@ const App = (() => {
     const unranked = ids.filter((id) => !initValues.has(id));
     lastInitWrite = Date.now();
     const r = await Bridge.setInitiative([...ranked, ...unranked]);
+    // Someone joining mid-fight mustn't move whose turn it is
+    if (r.ok && now.current && ids.includes(now.current)) {
+      const cur = await Bridge.setCurrentTurn(now.current);
+      if (!cur.ok) console.warn("[Spirekeeper] couldn't restore the current turn", cur.error);
+    }
     if (!r.ok) {
       // Name the mini the bridge refused, not its id
       const m = /creature not on this board: (\S+)/.exec(r.error || "");
@@ -4468,9 +4518,10 @@ const App = (() => {
   }
 
   /** Roll initiative for every linked monster in the fight, one throw, and place them. */
-  async function rollMonsterInitiative() {
+  async function rollMonsterInitiative(only = null) {
     const enc = Encounters.current;
-    const linked = (enc?.combatants || []).filter((c) => c.creatureId);
+    const held = (enc?.combatants || []).filter((c) => c.held).length;
+    const linked = (enc?.combatants || []).filter((c) => c.creatureId && !c.held && (!only || only.includes(c)));
     // TaleSpire's order has one place per mini: two monsters on one mini get one roll
     const byMini = new Map();
     for (const c of linked) {
@@ -4481,9 +4532,10 @@ const App = (() => {
     if (shared.length) {
       toast(`${shared.map((l) => l.map((c) => c.label).join(" and ")).join("; ")} ${shared.length === 1 ? "share one mini" : "share minis"}, and TaleSpire's order has one place per mini, so only the first is rolled. Fights marks them "same mini as": Unlink the second one and link it again.`, true);
     }
-    const unlinked = (enc?.combatants || []).filter((c) => !c.creatureId).length;
+    const unlinked = (only || enc?.combatants || []).filter((c) => !c.creatureId && !c.held).length;
+    if (only && unlinked) toast(`${unlinked} of them ${unlinked === 1 ? "isn't" : "aren't"} linked to a mini, so ${unlinked === 1 ? "it was" : "they were"} skipped. Link and click Roll monster initiative.`, true);
     const rows = [...byMini.values()].map((l) => l[0]).filter((c) => !initValues.has(c.creatureId));
-    if (!rows.length) return toast(`Every linked monster already has initiative this fight${unlinked ? `; ${unlinked} aren't linked to minis` : ""}.`);
+    if (!rows.length) return toast(`Every linked monster already has initiative this fight${unlinked ? `; ${unlinked} aren't linked to minis` : ""}${held ? `; ${held} held for later` : ""}.`);
     const groupIds = {};
     const groups = [];
     for (const c of rows) {
@@ -6373,9 +6425,9 @@ const App = (() => {
         // Kept so the initiative tracker can match on name when the turn queue's
         // ids turn out not to be creature ids.
         combatant.creatureName = info.name || null;
-        // A mini that already carries hit points makes the board authoritative
-        // for this combatant from here on.
+        // The monster's HP goes onto the mini; from then on the board carries it
         await saveCurrentEncounter();
+        await pushMonsterToMini(combatant);
         await refreshBoardHp();
         setTargetStatus(targetText(), Boolean(state.target));
         return toast(`${combatant.label} linked to ${name} #${Encounters.shortId(creatureId)}.`);
@@ -6845,6 +6897,7 @@ const App = (() => {
       modeText: () => (state.boardMode && state.boardMode !== "turn-based" ? MODE_TEXT[state.boardMode] : null),
       onRollInitiative: () => rollMonsterInitiative(),
       onLinkLassoed: () => linkLassoed(),
+      onHold: (c) => holdCombatant(c),
       initiativeRolls,
       onPlaceInitiative: () => placeInInitiative([]),
       onMove: (c, op) => {
@@ -7134,7 +7187,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // can't exercise the paths that matter — persistence and compression.
     // A mini you own (stats visible), one you don't (name only), and an id that
     // resolves to nothing at all.
-    const devCreatures = {
+    const devCreatures = window.devCreatures = {
       "dev-owned": { id: "dev-owned", name: "Gnoll Pack Lord", stats: [{ name: "AC", value: 15, max: 15 }] },
       "dev-foreign": { id: "dev-foreign", name: "Someone Else's Mini", stats: [] },
       // A party spanning the states the view has to render: healthy, bloodied,
@@ -7383,6 +7436,13 @@ document.addEventListener("DOMContentLoaded", () => {
           window.devQueue = { items, activeItemIndex: items.length ? idx : -1 };
           setTimeout(() => onInitiativeEvent({ kind: "initiativeUpdated", payload: { queue: window.devQueue } }), 50);
           return { ok: true, count: items.length };
+        }
+        if (path === "/initiative-current" && method === "POST") {
+          const q = window.devQueue || { items: [], activeItemIndex: -1 };
+          const i = q.items.findIndex((x) => x.id === params.id);
+          if (i === -1) return { ok: false, error: "that mini isn't in initiative" };
+          q.activeItemIndex = i;
+          return { ok: true };
         }
         if (path === "/ruler" && method === "POST") {
           // The box ruler: placed ~300 ms later as window.devBox's corners

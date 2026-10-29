@@ -1352,8 +1352,15 @@ initiative ends.
 
 Linking monsters to minis: select a mini on the board and click *Link mini*
 on the monster's row, and it links to that mini. Several at once: lasso the
-minis and click *Link lassoed* by Combatants; each goes to an unlinked monster
-with a matching name, then to whichever are left, in order. Every placement
+minis and click *Link lassoed* by Combatants; a mini named like a monster's
+label (Ghoul 2) goes to that monster, then by monster name, then in order.
+Linking puts the monster's HP (and AC, when the campaign has an AC stat) onto
+the mini; the statblock is what's run, the mini shows it.
+
+Monsters that join later: click *Hold* on their rows. Held monsters stay out
+of *Roll monster initiative*. When they arrive, click *Bring in* on one; it
+and every other held monster of its kind roll and slot into TaleSpire's order
+by their numbers, and whoever's turn it is stays current. Every placement
 of a mini has its own id, so four ghouls from one asset are four minis; rows
 show the end of that id (#a3f9) when names repeat. With nothing selected,
 *Link mini* falls back to TaleSpire's picker, which has been seen handing back

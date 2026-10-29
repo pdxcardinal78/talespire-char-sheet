@@ -234,6 +234,17 @@ const Bridge = (() => {
     }
   }
 
+  /** Make this mini's turn the current one. GM only. */
+  async function setCurrentTurn(id) {
+    if (!canWrite()) return { ok: false, error: "bridge unavailable" };
+    try {
+      const r = await transport("POST", "/initiative-current", { id });
+      return r?.ok ? { ok: true } : { ok: false, error: r?.error || "refused" };
+    } catch {
+      return { ok: false, error: "bridge unreachable" };
+    }
+  }
+
   /** Open TaleSpire's ruler as sphere, line, cone or box (the API has no box). Returns { ok, id }. */
   async function startRuler(kind) {
     if (!canWrite()) return { ok: false, error: "bridge unavailable" };
@@ -303,7 +314,7 @@ const Bridge = (() => {
   }
 
   return {
-    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, ddbCharacter, mode, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, initiative, setInitiative, onChange, useTransport,
+    probe, canWrite, setHp, setStat, onWrite, setEmote, statuses, ddbCharacter, mode, creatures, keepZone, removeZone, zoneInfo, startRuler, rulerInfo, initiative, setInitiative, setCurrentTurn, onChange, useTransport,
     get status() { return status; },
   };
 })();

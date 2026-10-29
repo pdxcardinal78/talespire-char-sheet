@@ -401,11 +401,12 @@ const Encounters = (() => {
   const shortId = (id) => String(id || "").replace(/[^A-Za-z0-9]/g, "").slice(-4);
 
   function linkText(c) {
+    if (c.held) return `<span class="warn">held, joins later</span>${c.creatureId ? ` · ${linkText({ ...c, held: false })}` : ""}`;
     if (!c.creatureId) return "no mini";
-    const twin = (current?.combatants || []).find((o) => o !== c && o.creatureId === c.creatureId);
+    const twin = (current?.combatants || []).find((o) => o.id !== c.id && o.creatureId === c.creatureId);
     // Several placements of one mini usually share its name, so the end of
     // each placement's own id tells them apart
-    const sameName = c.creatureName && (current?.combatants || []).some((o) => o !== c && o.creatureId && o.creatureName === c.creatureName);
+    const sameName = c.creatureName && (current?.combatants || []).some((o) => o.id !== c.id && o.creatureId && o.creatureName === c.creatureName);
     const tag = sameName ? ` #${escape(shortId(c.creatureId))}` : "";
     const on = c.creatureName ? `on ${escape(c.creatureName)}${tag}` : "linked";
     return twin ? `<span class="warn">${on}, same mini as ${escape(twin.label)}</span>` : on;
@@ -495,6 +496,16 @@ const Encounters = (() => {
     const link = el("button", "btn btn-small btn-ghost", c.creatureId ? "Unlink" : "Link mini");
     link.onclick = () => deps.onLink(c);
     controls.appendChild(link);
+
+    // Monsters that join later (the wraiths in round 2) wait outside initiative
+    if (deps.onHold) {
+      const hold = el("button", `btn btn-small ${c.held ? "btn-gold" : "btn-ghost"}`, c.held ? "Bring in" : "Hold");
+      hold.title = c.held
+        ? "Roll initiative for this monster (and any other held ones of its kind) and add them to TaleSpire's order"
+        : "Keep this monster out of initiative until it joins the fight";
+      hold.onclick = () => deps.onHold(c);
+      controls.appendChild(hold);
+    }
 
     const drop = el("button", "btn btn-small btn-ghost", "✕");
     drop.title = "Remove from the encounter";
