@@ -1350,6 +1350,11 @@ initiative* for every linked monster in one throw. Minis already in the order
 without a number keep their places after. The numbers are forgotten when
 initiative ends.
 
+Monsters that share one mini get one roll and one place, because TaleSpire's
+order is a list of minis; the panel says which ones it folded together. A mini
+that isn't on the current board is left out and named, and the rest are still
+placed (the bridge refuses the whole list otherwise).
+
 Every step says what happened, because a roll that silently stays in chat
 looks exactly like one that worked:
 

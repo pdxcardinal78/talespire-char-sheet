@@ -172,7 +172,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.29.1";
+  const APP_VERSION = "0.29.2";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -4357,7 +4357,9 @@ const App = (() => {
     for (const e of entries) {
       if (e?.id && Number.isFinite(e.value)) initValues.set(e.id, { value: e.value, dex: e.dex ?? 0, name: e.name || initValues.get(e.id)?.name || null, placed: false });
     }
-    const who = entries.map((e) => `${e.name || "a mini"} ${e.value}`).join(", ");
+    const who = entries.length
+      ? entries.map((e) => `${e.name || "a mini"} ${e.value}`).join(", ")
+      : `${initValues.size} ${initValues.size === 1 ? "roll" : "rolls"}`;
     const fail = (error) => {
       toast(`Initiative ${who}: not placed in TaleSpire's turn order (${error}). It's listed in Fights.`, true);
       renderInitiativeRolls();
@@ -4367,15 +4369,28 @@ const App = (() => {
     const now = await Bridge.initiative();
     if (!now) return fail("couldn't read TaleSpire's turn order; is a board open?");
     const ids = now.items.filter((i) => i.kind === "creature").map((i) => i.id);
-    for (const e of entries) if (e?.id && !ids.includes(e.id)) ids.push(e.id);
+    // Everyone rolled this fight goes in, not only this call's entries: a retry
+    // (Place N in TaleSpire's order) passes none and must add the missing ones
+    for (const id of initValues.keys()) if (!ids.includes(id)) ids.push(id);
     const ranked = ids.filter((id) => initValues.has(id)).sort((a, b) => {
       const x = initValues.get(a);
       const y = initValues.get(b);
       return y.value - x.value || (y.dex ?? 0) - (x.dex ?? 0);
     });
     const unranked = ids.filter((id) => !initValues.has(id));
+    lastInitWrite = Date.now();
     const r = await Bridge.setInitiative([...ranked, ...unranked]);
-    if (!r.ok) return fail(r.error);
+    if (!r.ok) {
+      // Name the mini the bridge refused, not its id
+      const m = /creature not on this board: (\S+)/.exec(r.error || "");
+      if (m) {
+        const name = initValues.get(m[1])?.name || "a mini";
+        initValues.delete(m[1]);
+        toast(`${name}'s mini isn't on this board, so it was left out of the order. Re-link it in Fights.`, true);
+        return placeInInitiative([]); // place the rest
+      }
+      return fail(r.error);
+    }
     for (const id of ranked) initValues.get(id).placed = true;
     toast(`Initiative ${who}: placed in TaleSpire's turn order.`);
     renderInitiativeRolls();
@@ -4395,7 +4410,11 @@ const App = (() => {
   }
 
   /** A new fight starts from nothing: forget last fight's numbers when initiative ends. */
+  let lastInitWrite = 0;
   function clearInitiativeValues() {
+    // Rewriting TaleSpire's order can briefly look like initiative ending;
+    // don't forget this fight's rolls because of our own write
+    if (Date.now() - lastInitWrite < 5000) return;
     initValues.clear();
     renderInitiativeRolls();
   }
@@ -4403,8 +4422,20 @@ const App = (() => {
   /** Roll initiative for every linked monster in the fight, one throw, and place them. */
   async function rollMonsterInitiative() {
     const enc = Encounters.current;
-    const rows = (enc?.combatants || []).filter((c) => c.creatureId && !initValues.has(c.creatureId));
-    if (!rows.length) return toast("Every linked monster already has initiative (link minis to roll for them).");
+    const linked = (enc?.combatants || []).filter((c) => c.creatureId);
+    // TaleSpire's order has one place per mini: two monsters on one mini get one roll
+    const byMini = new Map();
+    for (const c of linked) {
+      if (!byMini.has(c.creatureId)) byMini.set(c.creatureId, []);
+      byMini.get(c.creatureId).push(c);
+    }
+    const shared = [...byMini.values()].filter((l) => l.length > 1);
+    if (shared.length) {
+      toast(`${shared.map((l) => l.map((c) => c.label).join(" and ")).join("; ")} ${shared.length === 1 ? "share one mini" : "share minis"}, and TaleSpire's order has one place per mini, so only the first is rolled. Re-link them to separate minis.`, true);
+    }
+    const unlinked = (enc?.combatants || []).filter((c) => !c.creatureId).length;
+    const rows = [...byMini.values()].map((l) => l[0]).filter((c) => !initValues.has(c.creatureId));
+    if (!rows.length) return toast(`Every linked monster already has initiative this fight${unlinked ? `; ${unlinked} aren't linked to minis` : ""}.`);
     const groupIds = {};
     const groups = [];
     for (const c of rows) {
@@ -5968,7 +5999,13 @@ const App = (() => {
       else sendInitiativeToGm(ctx.initiativeFor, summary.total, myName);
     }
     if (ctx.kind === "initiativeGroup") {
-      const entries = (summary.groups || []).filter((g) => g.total != null).map((g) => ({ ...ctx.groupIds[g.name], value: g.total }));
+      const entries = (summary.groups || []).filter((g) => g.total != null && ctx.groupIds[g.name]?.id).map((g) => ({ ...ctx.groupIds[g.name], value: g.total }));
+      const asked = Object.keys(ctx.groupIds || {});
+      const missing = asked.filter((n) => !entries.some((e) => `${e.name}: initiative` === n)).map((n) => n.replace(/: initiative$/, ""));
+      if (missing.length) {
+        console.warn("[Spirekeeper] initiative results missing for", missing, "groups back:", (summary.groups || []).map((g) => [g.name, g.total]));
+        toast(`Rolled ${asked.length} monsters but got results for ${entries.length}; missing ${missing.join(", ")}. Roll monster initiative again for them.`, true);
+      }
       await placeInInitiative(entries);
       await postChat(`${Rolls.bold("Initiative")}: ${escapeText((summary.groups || []).map((g) => `${g.name.replace(/: initiative$/, "")} ${g.total}`).join(", "))}`, null);
       return;
@@ -7278,6 +7315,9 @@ document.addEventListener("DOMContentLoaded", () => {
           return { ok: true, items: q.items.map((i) => ({ id: i.id, kind: "creature" })), current: q.items[q.activeItemIndex]?.id || null };
         }
         if (path === "/initiative-set" && method === "POST") {
+          // As the real bridge does: a mini that isn't on the board refuses the lot
+          const gone = params.order.split(",").filter(Boolean).find((id) => !devCreatures[id]);
+          if (gone) return { ok: false, error: `creature not on this board: ${gone}` };
           const prev = window.devQueue || { items: [], activeItemIndex: -1 };
           const cur = prev.items[prev.activeItemIndex]?.id;
           const items = params.order.split(",").filter(Boolean).map((id) => ({ id, name: devCreatures[id]?.name || id, kind: "creature" }));
