@@ -1960,3 +1960,4 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 .init-rolls-list { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 200px; }
 .init-roll { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px dashed var(--line); color: var(--fg-dim); font-variant-numeric: tabular-nums; }
 .init-roll.is-placed { border-style: solid; border-color: var(--accent); color: var(--fg); }
+.combatant .sub .warn { color: var(--danger); font-weight: 600; }

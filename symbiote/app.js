@@ -4431,7 +4431,7 @@ const App = (() => {
     }
     const shared = [...byMini.values()].filter((l) => l.length > 1);
     if (shared.length) {
-      toast(`${shared.map((l) => l.map((c) => c.label).join(" and ")).join("; ")} ${shared.length === 1 ? "share one mini" : "share minis"}, and TaleSpire's order has one place per mini, so only the first is rolled. Re-link them to separate minis.`, true);
+      toast(`${shared.map((l) => l.map((c) => c.label).join(" and ")).join("; ")} ${shared.length === 1 ? "share one mini" : "share minis"}, and TaleSpire's order has one place per mini, so only the first is rolled. Fights marks them "same mini as": Unlink the second one and link it again.`, true);
     }
     const unlinked = (enc?.combatants || []).filter((c) => !c.creatureId).length;
     const rows = [...byMini.values()].map((l) => l[0]).filter((c) => !initValues.has(c.creatureId));
@@ -6311,6 +6311,15 @@ const App = (() => {
       // the result lands.
       if (state.linkingCombatant) {
         const combatant = state.linkingCombatant;
+        // One mini, one place in TaleSpire's order: a mini another monster in
+        // this fight is already on can't be this one's too. The picker stays
+        // open, so the next mini clicked still links this monster.
+        const owner = (Encounters.current?.combatants || []).find((c) => c !== combatant && c.creatureId === creatureId);
+        if (owner) {
+          console.warn("[Spirekeeper] picked mini already linked", creatureId, owner.label);
+          setTargetStatus(`Click a different mini for ${combatant.label}`, false);
+          return toast(`${name} is already ${owner.label}'s mini. Click a different mini for ${combatant.label}.`, true);
+        }
         state.linkingCombatant = null;
         combatant.creatureId = creatureId;
         // Kept so the initiative tracker can match on name when the turn queue's

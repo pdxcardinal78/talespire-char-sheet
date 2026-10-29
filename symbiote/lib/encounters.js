@@ -393,6 +393,18 @@ const Encounters = (() => {
     return box;
   }
 
+  /**
+   * Which mini a combatant is on, and a warning when another combatant in this
+   * fight is on the same one: TaleSpire's turn order has one place per mini, so
+   * the second of them never gets a turn.
+   */
+  function linkText(c) {
+    if (!c.creatureId) return "no mini";
+    const twin = (current?.combatants || []).find((o) => o !== c && o.creatureId === c.creatureId);
+    const on = c.creatureName ? `on ${escape(c.creatureName)}` : "linked";
+    return twin ? `<span class="warn">${on}, same mini as ${escape(twin.label)}</span>` : on;
+  }
+
   function combatantRow(c) {
     const hp = hpFor(c);
     const share = hp.max ? Math.max(0, Math.min(1, (hp.value ?? 0) / hp.max)) : null;
@@ -403,7 +415,7 @@ const Encounters = (() => {
     const name = el("button", "combatant-name");
     name.innerHTML =
       `<span>${escape(c.label)}</span>` +
-      `<span class="sub">${escape(c.creatureId ? "linked" : "no mini")}${c.ac != null ? ` · AC ${c.ac}` : ""}</span>`;
+      `<span class="sub">${linkText(c)}${c.ac != null ? ` · AC ${c.ac}` : ""}</span>`;
     name.title = "Select — damage rolled on the board applies here";
     name.onclick = () => select(c.id);
     row.appendChild(name);
