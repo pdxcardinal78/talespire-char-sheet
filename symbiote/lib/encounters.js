@@ -398,10 +398,16 @@ const Encounters = (() => {
    * fight is on the same one: TaleSpire's turn order has one place per mini, so
    * the second of them never gets a turn.
    */
+  const shortId = (id) => String(id || "").replace(/[^A-Za-z0-9]/g, "").slice(-4);
+
   function linkText(c) {
     if (!c.creatureId) return "no mini";
     const twin = (current?.combatants || []).find((o) => o !== c && o.creatureId === c.creatureId);
-    const on = c.creatureName ? `on ${escape(c.creatureName)}` : "linked";
+    // Several placements of one mini usually share its name, so the end of
+    // each placement's own id tells them apart
+    const sameName = c.creatureName && (current?.combatants || []).some((o) => o !== c && o.creatureId && o.creatureName === c.creatureName);
+    const tag = sameName ? ` #${escape(shortId(c.creatureId))}` : "";
+    const on = c.creatureName ? `on ${escape(c.creatureName)}${tag}` : "linked";
     return twin ? `<span class="warn">${on}, same mini as ${escape(twin.label)}</span>` : on;
   }
 
@@ -770,7 +776,7 @@ const Encounters = (() => {
     String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   return {
-    configure, addMonster, removeCombatant, hpFor, applyDamage, noteBoardHp, isWatching,
+    shortId, configure, addMonster, removeCombatant, hpFor, applyDamage, noteBoardHp, isWatching,
     readBoard, setQueue, turnOrder, renderList, render, setCurrent, expand, conditionsOf,
     get expanded() { return expanded; },
     select, selected, offerDamage, dismissDamage,

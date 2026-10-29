@@ -6318,7 +6318,7 @@ const App = (() => {
         if (owner) {
           console.warn("[Spirekeeper] picked mini already linked", creatureId, owner.label);
           setTargetStatus(`Click a different mini for ${combatant.label}`, false);
-          return toast(`${name} is already ${owner.label}'s mini. Click a different mini for ${combatant.label}.`, true);
+          return toast(`That's the same placed mini as ${owner.label} (${name} #${Encounters.shortId(creatureId)}). Click another placement for ${combatant.label}.`, true);
         }
         state.linkingCombatant = null;
         combatant.creatureId = creatureId;
@@ -6330,7 +6330,7 @@ const App = (() => {
         await saveCurrentEncounter();
         await refreshBoardHp();
         setTargetStatus(targetText(), Boolean(state.target));
-        return toast(`${combatant.label} linked to ${name}.`);
+        return toast(`${combatant.label} linked to ${name} #${Encounters.shortId(creatureId)}.`);
       }
 
       if (state.pickingSpeaker) {
