@@ -999,8 +999,56 @@ const App = (() => {
       await saveCurrentEncounter();
       return toast(`${combatant.label} unlinked.`);
     }
+    // A mini selected on the board links straight away. TaleSpire's selection
+    // is reliable where its picker has handed back the previous pick.
+    const sel = await lassoed();
+    const linkedTo = (id) => (Encounters.current?.combatants || []).find((c) => c.creatureId === id);
+    if (sel.length === 1 && !linkedTo(sel[0].id)) {
+      combatant.creatureId = sel[0].id;
+      combatant.creatureName = sel[0].name === "Unnamed mini" ? null : sel[0].name;
+      await saveCurrentEncounter();
+      await refreshBoardHp();
+      return toast(`${combatant.label} linked to ${sel[0].name} #${Encounters.shortId(sel[0].id)}.`);
+    }
     state.linkingCombatant = combatant;
     await pickTarget();
+  }
+
+  /**
+   * Lassoed minis onto the fight's unlinked monsters in one go: a mini goes to
+   * a monster whose name it shares where there is one, otherwise to the next
+   * unlinked monster down the list. Minis already linked here are skipped.
+   */
+  async function linkLassoed() {
+    const enc = Encounters.current;
+    if (!enc) return;
+    const sel = await lassoed();
+    if (!sel.length) return toast("Lasso (or select) the minis on the board first, then click Link lassoed.", true);
+    const taken = new Set(enc.combatants.map((c) => c.creatureId).filter(Boolean));
+    const fresh = sel.filter((m) => !taken.has(m.id));
+    const open = enc.combatants.filter((c) => !c.creatureId);
+    const norm = (t) => String(t || "").toLowerCase().replace(/\s*\d+$/, "").trim();
+    const done = [];
+    // Name matches first, so lassoed ghouls and wraiths sort themselves out
+    for (const pass of ["name", "any"]) {
+      for (const m of fresh) {
+        if (m.linked) continue;
+        const i = open.findIndex((c) => pass === "any" || (norm(m.name) && (norm(m.name).includes(norm(c.name)) || norm(c.name).includes(norm(m.name)))));
+        if (i === -1) continue;
+        const c = open.splice(i, 1)[0];
+        c.creatureId = m.id;
+        c.creatureName = m.name === "Unnamed mini" ? null : m.name;
+        m.linked = true;
+        done.push(`${c.label} → ${m.name} #${Encounters.shortId(m.id)}`);
+      }
+    }
+    if (!done.length) {
+      return toast(fresh.length ? "Every monster here is already linked." : "Those minis are already linked to monsters here.", true);
+    }
+    await saveCurrentEncounter();
+    await refreshBoardHp();
+    const skipped = sel.length - done.length;
+    toast(`Linked ${done.join(", ")}.${skipped ? ` ${skipped} lassoed ${skipped === 1 ? "mini was" : "minis were"} already linked or had no monster left.` : ""}`);
   }
 
   async function removeCombatant(combatant) {
@@ -6796,6 +6844,7 @@ const App = (() => {
       canRollInitiative: () => Bridge.canWrite(),
       modeText: () => (state.boardMode && state.boardMode !== "turn-based" ? MODE_TEXT[state.boardMode] : null),
       onRollInitiative: () => rollMonsterInitiative(),
+      onLinkLassoed: () => linkLassoed(),
       initiativeRolls,
       onPlaceInitiative: () => placeInInitiative([]),
       onMove: (c, op) => {

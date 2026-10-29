@@ -738,7 +738,15 @@ const Encounters = (() => {
     renderInitiativeRolls(host);
     renderTurnOrder(host);
 
-    host.appendChild(el("h3", "bestiary-heading", "Combatants"));
+    const combHead = el("h3", "bestiary-heading", "Combatants");
+    if (current.combatants.some((c) => !c.creatureId) && deps.onLinkLassoed) {
+      const n = deps.lassoCount?.() || 0;
+      const linkAll = el("button", "btn btn-small btn-ghost", n ? `Link ${n} lassoed` : "Link lassoed");
+      linkAll.title = "Lasso the minis on the board, then click: each goes to an unlinked monster here, matching names where it can";
+      linkAll.onclick = () => deps.onLinkLassoed();
+      combHead.appendChild(linkAll);
+    }
+    host.appendChild(combHead);
     if (!current.combatants.length) {
       host.appendChild(el("p", "hint", "Nothing here yet. Search for monsters below and add them."));
     }

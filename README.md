@@ -1350,6 +1350,15 @@ initiative* for every linked monster in one throw. Minis already in the order
 without a number keep their places after. The numbers are forgotten when
 initiative ends.
 
+Linking monsters to minis: select a mini on the board and click *Link mini*
+on the monster's row, and it links to that mini. Several at once: lasso the
+minis and click *Link lassoed* by Combatants; each goes to an unlinked monster
+with a matching name, then to whichever are left, in order. Every placement
+of a mini has its own id, so four ghouls from one asset are four minis; rows
+show the end of that id (#a3f9) when names repeat. With nothing selected,
+*Link mini* falls back to TaleSpire's picker, which has been seen handing back
+the previous pick.
+
 Monsters that share one mini get one roll and one place, because TaleSpire's
 order is a list of minis; the panel says which ones it folded together. A mini
 that isn't on the current board is left out and named, and the rest are still
