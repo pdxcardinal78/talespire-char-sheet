@@ -1350,6 +1350,20 @@ initiative* for every linked monster in one throw. Minis already in the order
 without a number keep their places after. The numbers are forgotten when
 initiative ends.
 
+Every step says what happened, because a roll that silently stays in chat
+looks exactly like one that worked:
+
+- **The roller.** An unlinked sheet is told its roll goes to chat only (the
+  mini is what gets placed). A linked player's panel waits for the GM's panel
+  to answer: *Your initiative is in TaleSpire's turn order*, or the reason it
+  couldn't be placed. With no answer in five seconds, it says no GM panel
+  answered.
+- **The GM.** Each roll that arrives says whether it was placed, or why not
+  (no bridge, no board open, the bridge's error).
+- **Fights** lists this fight's rolls under *Turn order*, highest first; a
+  solid chip is in TaleSpire's order, a dashed one isn't. *Place N in
+  TaleSpire's order* tries again for the ones that aren't.
+
 ## Known gaps
 
 These are deliberate omissions, not bugs to trip over later:

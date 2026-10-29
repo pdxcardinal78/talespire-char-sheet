@@ -107,9 +107,14 @@ const Party = (() => {
   }
 
   /** A player's initiative roll, for the GM's panel to place in TaleSpire's order. */
-  async function initiative(creatureId, value, dex) {
+  async function initiative(creatureId, value, dex, name = null) {
     // "iv", not "v": every message's "v" is the protocol version
-    await broadcast({ t: "ini", c: creatureId, iv: value, d: dex });
+    await broadcast({ t: "ini", c: creatureId, iv: value, d: dex, ...(name ? { n: String(name).slice(0, 60) } : {}) });
+  }
+
+  /** The GM's panel answering an initiative roll: placed in TaleSpire's order, or why not. */
+  async function initiativeAck(creatureId, ok, error = null) {
+    await broadcast({ t: "ina", c: creatureId, ok: ok ? 1 : 0, ...(error ? { e: String(error).slice(0, 120) } : {}) });
   }
 
   // --- saving throws (see lib/saves.js) --------------------------------------
@@ -253,7 +258,9 @@ const Party = (() => {
     } else if (msg.t === "tmp" && handlers.onTemp) {
       handlers.onTemp({ creatureId: msg.c, temp: msg.tp });
     } else if (msg.t === "ini" && handlers.onInitiative) {
-      handlers.onInitiative({ creatureId: msg.c, value: msg.iv, dex: msg.d });
+      handlers.onInitiative({ creatureId: msg.c, value: msg.iv, dex: msg.d, name: msg.n || null });
+    } else if (msg.t === "ina" && handlers.onInitiativeAck) {
+      handlers.onInitiativeAck({ creatureId: msg.c, ok: Boolean(msg.ok), error: msg.e || null });
     } else if (msg.t === "svs" && handlers.onSaveSession) {
       handlers.onSaveSession({
         id: msg.s, name: msg.n, ability: msg.ab, dc: msg.dc, half: Boolean(msg.h),
@@ -316,7 +323,7 @@ const Party = (() => {
   }
 
   return {
-    configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, tempGrant, saveSession, saveAck, saveQuery, saveResult, initiative,
+    configure, grant, revoke, acknowledge, reportVitals, setTemp, hit, tempGrant, saveSession, saveAck, saveQuery, saveResult, initiative, initiativeAck,
     conditionMapping, requestStatusMappings, condition,
     zoneQuery, zoneReply, zoneKeep, zoneKept, zoneRemove,
     receive, reachablePlayers, MAX_MESSAGE,

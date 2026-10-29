@@ -63,7 +63,8 @@ const App = (() => {
         onGrant: onEffectGranted,
         onTempGrant,
         onSaveSession,
-        onInitiative: ({ creatureId, value, dex }) => placeInInitiative([{ id: creatureId, value, dex }]),
+        onInitiative: onInitiativeFromPlayer,
+        onInitiativeAck,
         onSaveAck,
         onSaveQuery,
         onSaveResult,
@@ -171,7 +172,7 @@ const App = (() => {
    * runs from a file origin and cannot fetch its own files. `dev/preflight.mjs`
    * fails if this drifts from the manifest, which is the part that would rot.
    */
-  const APP_VERSION = "0.29.0";
+  const APP_VERSION = "0.29.1";
 
   function renderVersion() {
     console.log(`[Spirekeeper] v${APP_VERSION}`);
@@ -4303,6 +4304,7 @@ const App = (() => {
     const s = state.sheet;
     state.initRolled = true;
     renderCombatCard();
+    if (!state.creatureId) toast("Rolling to chat only. Link your mini (under your name) to put initiative in TaleSpire's turn order.", true);
     await doRoll({
       name: "Initiative",
       roll: `d20${DDB.signed(s.initiative)}`,
@@ -4319,13 +4321,51 @@ const App = (() => {
   // TaleSpire's order by them: highest first, ties to the higher Dexterity.
   // Minis already in the order without a number keep their places after.
 
-  const initValues = new Map(); // creature id -> { value, dex }
+  const initValues = new Map(); // creature id -> { value, dex, name, placed }
 
+  // A player's panel waits for the GM's answer; silence means nobody placed it
+  let initAckTimer = null;
+  function sendInitiativeToGm(forMini, total, name) {
+    Party.initiative(forMini.id, total, forMini.dex, name).catch(() => {});
+    clearTimeout(initAckTimer);
+    initAckTimer = setTimeout(() => {
+      toast(`Initiative ${total} posted to chat. No GM panel answered, so the GM will need to place you in TaleSpire's turn order.`, true);
+    }, 5000);
+  }
+
+  function onInitiativeAck({ creatureId, ok, error }) {
+    if (state.isGM || creatureId !== state.creatureId) return;
+    clearTimeout(initAckTimer);
+    if (ok) toast("Your initiative is in TaleSpire's turn order.");
+    else toast(`The GM got your initiative but couldn't place it (${error || "no reason given"}).`, true);
+  }
+
+  /** A player's roll arriving on the GM's panel. */
+  async function onInitiativeFromPlayer({ creatureId, value, dex, name }) {
+    if (!state.isGM) return;
+    const r = await placeInInitiative([{ id: creatureId, value, dex, name }]);
+    Party.initiativeAck(creatureId, r.ok, r.error).catch(() => {});
+  }
+
+  /**
+   * Record initiative rolls and, with the bridge, sort TaleSpire's turn order
+   * by them. Returns { ok, error }, and always says what happened: a roll that
+   * can't be placed is still listed in Fights for the GM to place by hand.
+   */
   async function placeInInitiative(entries) {
-    if (!state.isGM || !Bridge.canWrite()) return;
-    for (const e of entries) if (e?.id && Number.isFinite(e.value)) initValues.set(e.id, { value: e.value, dex: e.dex ?? 0 });
+    if (!state.isGM) return { ok: false, error: "not the GM's panel" };
+    for (const e of entries) {
+      if (e?.id && Number.isFinite(e.value)) initValues.set(e.id, { value: e.value, dex: e.dex ?? 0, name: e.name || initValues.get(e.id)?.name || null, placed: false });
+    }
+    const who = entries.map((e) => `${e.name || "a mini"} ${e.value}`).join(", ");
+    const fail = (error) => {
+      toast(`Initiative ${who}: not placed in TaleSpire's turn order (${error}). It's listed in Fights.`, true);
+      renderInitiativeRolls();
+      return { ok: false, error };
+    };
+    if (!Bridge.canWrite()) return fail("the bridge isn't running; set the order in TaleSpire by hand");
     const now = await Bridge.initiative();
-    if (!now) return;
+    if (!now) return fail("couldn't read TaleSpire's turn order; is a board open?");
     const ids = now.items.filter((i) => i.kind === "creature").map((i) => i.id);
     for (const e of entries) if (e?.id && !ids.includes(e.id)) ids.push(e.id);
     const ranked = ids.filter((id) => initValues.has(id)).sort((a, b) => {
@@ -4335,13 +4375,29 @@ const App = (() => {
     });
     const unranked = ids.filter((id) => !initValues.has(id));
     const r = await Bridge.setInitiative([...ranked, ...unranked]);
-    if (!r.ok) return toast(`Couldn't update TaleSpire's initiative (${r.error}).`, true);
+    if (!r.ok) return fail(r.error);
+    for (const id of ranked) initValues.get(id).placed = true;
+    toast(`Initiative ${who}: placed in TaleSpire's turn order.`);
+    renderInitiativeRolls();
     refreshInitiative();
+    return { ok: true };
+  }
+
+  /** This fight's initiative rolls, for Fights: who, what, and whether it's in TaleSpire's order. */
+  function initiativeRolls() {
+    return [...initValues.entries()]
+      .map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => b.value - a.value || (b.dex ?? 0) - (a.dex ?? 0));
+  }
+
+  function renderInitiativeRolls() {
+    if (currentView === "encounters") Encounters.render();
   }
 
   /** A new fight starts from nothing: forget last fight's numbers when initiative ends. */
   function clearInitiativeValues() {
     initValues.clear();
+    renderInitiativeRolls();
   }
 
   /** Roll initiative for every linked monster in the fight, one throw, and place them. */
@@ -4362,7 +4418,7 @@ const App = (() => {
         /* +0 */
       }
       const name = `${c.label}: initiative`;
-      groupIds[name] = { id: c.creatureId, dex: score };
+      groupIds[name] = { id: c.creatureId, dex: score, name: c.label };
       groups.push({ name, roll: `d20${DDB.signed(dex)}` });
     }
     try {
@@ -5907,8 +5963,9 @@ const App = (() => {
 
     // Initiative: into TaleSpire's order (here if this is the GM's panel, else via the GM's)
     if (ctx.initiativeFor && summary.total != null) {
-      if (state.isGM && Bridge.canWrite()) placeInInitiative([{ id: ctx.initiativeFor.id, value: summary.total, dex: ctx.initiativeFor.dex }]);
-      else Party.initiative(ctx.initiativeFor.id, summary.total, ctx.initiativeFor.dex).catch(() => {});
+      const myName = state.sheet?.identity?.name || null;
+      if (state.isGM) placeInInitiative([{ id: ctx.initiativeFor.id, value: summary.total, dex: ctx.initiativeFor.dex, name: myName }]);
+      else sendInitiativeToGm(ctx.initiativeFor, summary.total, myName);
     }
     if (ctx.kind === "initiativeGroup") {
       const entries = (summary.groups || []).filter((g) => g.total != null).map((g) => ({ ...ctx.groupIds[g.name], value: g.total }));
@@ -6693,6 +6750,8 @@ const App = (() => {
       canRollInitiative: () => Bridge.canWrite(),
       modeText: () => (state.boardMode && state.boardMode !== "turn-based" ? MODE_TEXT[state.boardMode] : null),
       onRollInitiative: () => rollMonsterInitiative(),
+      initiativeRolls,
+      onPlaceInitiative: () => placeInInitiative([]),
       onMove: (c, op) => {
         const t = (c.turnState ||= { moved: 0, dashes: 0, lastPos: null });
         if (op === "dash") t.dashes += 1;

@@ -1954,3 +1954,9 @@ select.pill-add option { background: var(--bg-2); color: var(--fg); }
 #group-damage-type { flex: 0 1 110px; min-width: 0; }
 .group-damage-row .hint { margin: 0; font-size: 12px; }
 #group-damage-type { background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 6px; font: inherit; font-size: 13px; }
+
+/* ---------- this fight's initiative rolls ---------- */
+.init-rolls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; }
+.init-rolls-list { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 200px; }
+.init-roll { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px dashed var(--line); color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.init-roll.is-placed { border-style: solid; border-color: var(--accent); color: var(--fg); }

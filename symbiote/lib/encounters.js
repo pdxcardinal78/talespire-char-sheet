@@ -531,6 +531,32 @@ const Encounters = (() => {
     return box;
   }
 
+  /**
+   * This fight's initiative rolls, highest first, marked when they're in
+   * TaleSpire's turn order. A roll that couldn't be placed stays here, so the
+   * GM can place it with the button or set the order in TaleSpire by hand.
+   */
+  function renderInitiativeRolls(host) {
+    const rolls = deps.initiativeRolls?.() || [];
+    if (!rolls.length) return;
+    const box = el("div", "init-rolls");
+    const line = el("div", "init-rolls-list");
+    for (const r of rolls) {
+      const chip = el("span", `init-roll${r.placed ? " is-placed" : ""}`, `${r.name || "Unnamed"} ${r.value}`);
+      chip.title = r.placed ? "In TaleSpire's turn order" : "Not placed in TaleSpire's turn order yet";
+      line.appendChild(chip);
+    }
+    box.appendChild(line);
+    const waiting = rolls.filter((r) => !r.placed).length;
+    if (waiting && deps.onPlaceInitiative) {
+      const b = el("button", "btn btn-small", `Place ${waiting} in TaleSpire's order`);
+      b.title = "Sort TaleSpire's turn order by these rolls (needs the bridge)";
+      b.onclick = () => deps.onPlaceInitiative();
+      box.appendChild(b);
+    }
+    host.appendChild(box);
+  }
+
   function renderTurnOrder(host) {
     const order = turnOrder();
     if (!order.length) {
@@ -691,6 +717,7 @@ const Encounters = (() => {
       orderHead.appendChild(roll);
     }
     host.appendChild(orderHead);
+    renderInitiativeRolls(host);
     renderTurnOrder(host);
 
     host.appendChild(el("h3", "bestiary-heading", "Combatants"));
